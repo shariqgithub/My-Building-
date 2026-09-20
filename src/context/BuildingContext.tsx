@@ -1475,7 +1475,11 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const response = await fetch('/api/auth/send-admin-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: targetEmail }),
+        body: JSON.stringify({
+          email: targetEmail,
+          buildingName: settings.buildingName || INITIAL_SETTINGS.buildingName,
+          societyPayeeName: settings.societyPayeeName || INITIAL_SETTINGS.societyPayeeName,
+        }),
       });
 
       const data = await response.json();

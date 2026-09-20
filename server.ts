@@ -22,12 +22,15 @@ async function startServer() {
   // API Route: Send Real Admin OTP to Email
   app.post('/api/auth/send-admin-otp', async (req, res) => {
     try {
-      const { email } = req.body;
+      const { email, buildingName, societyPayeeName } = req.body;
       const cleanEmail = (email || '').trim().toLowerCase();
 
       if (!cleanEmail || !cleanEmail.includes('@')) {
         return res.status(400).json({ success: false, error: 'A valid email address is required.' });
       }
+
+      const displayBuildingName = (buildingName || societyPayeeName || 'Society Management Portal').trim();
+      const displayFooterName = (societyPayeeName || buildingName || 'Society Management').trim();
 
       // Generate 6-digit numeric OTP code
       const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -52,16 +55,16 @@ async function startServer() {
       const { data, error } = await resend.emails.send({
         from: 'Society Admin <onboarding@resend.dev>',
         to: [cleanEmail],
-        subject: `Your Society Administrator One-Time Passcode: ${generatedOtp}`,
+        subject: `[${displayBuildingName}] Your Administrator One-Time Passcode: ${generatedOtp}`,
         html: `
           <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 540px; margin: 0 auto; padding: 32px 24px; background-color: #f8fafc; border-radius: 16px;">
             <div style="text-align: center; margin-bottom: 24px;">
-              <h2 style="color: #0f172a; margin: 0 0 6px 0; font-size: 22px;">Society Management Portal</h2>
+              <h2 style="color: #0f172a; margin: 0 0 6px 0; font-size: 22px;">${displayBuildingName}</h2>
               <p style="color: #64748b; margin: 0; font-size: 14px;">Administrator Sign-In Verification</p>
             </div>
             <div style="background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 28px 24px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
               <p style="color: #334155; font-size: 14px; margin-top: 0; margin-bottom: 20px;">
-                You requested a secure one-time passcode (OTP) to log in as <strong>Society Secretary / Administrator</strong>.
+                You requested a secure one-time passcode (OTP) to log in as <strong>Society Secretary / Administrator</strong> for <strong>${displayBuildingName}</strong>.
               </p>
               <div style="display: inline-block; background-color: #eff6ff; border: 2px dashed #3b82f6; border-radius: 12px; padding: 14px 28px; margin: 8px 0 20px 0;">
                 <span style="font-family: monospace; font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #1d4ed8;">${generatedOtp}</span>
@@ -71,7 +74,7 @@ async function startServer() {
               </p>
             </div>
             <div style="text-align: center; margin-top: 24px; color: #94a3b8; font-size: 12px;">
-              Gulmohar Heights Apartment Management &bull; Automated System Notice
+              ${displayFooterName} &bull; Automated System Notice
             </div>
           </div>
         `,
