@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Building Sub-Meter Electricity Tracker</title>
+    <meta name="description" content="Mobile-first electricity bill and building expenditure tracking app for buildings with 15 flats sharing one common meter, supporting secure PIN login, monthly expenditure logging, net savings vs out-of-pocket accounting, custom flat rates, UPI payments, and admin reading management." />
+    <meta name="theme-color" content="#047857" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Flat Tracker" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <link rel="manifest" href="./manifest.json" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <meta property="og:title" content="Building Sub-Meter Electricity Tracker" />
+    <meta property="og:description" content="Mobile-first electricity bill and building expenditure tracking app for buildings with 15 flats sharing one common meter, supporting secure PIN login, monthly expenditure logging, net savings vs out-of-pocket accounting, custom flat rates, UPI payments, and admin reading management." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      // Immediate service worker registration for PWA and PWABuilder audit
+      if ('serviceWorker' in navigator) {
+        const swUrl = new URL('sw.js', window.location.href).pathname;
+        navigator.serviceWorker.register(swUrl)
+          .then(function(reg) { console.log('SW active:', reg.scope); })
+          .catch(function(err) { console.warn('SW error:', err); });
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="./registerSW.js"></script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

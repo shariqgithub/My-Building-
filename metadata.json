@@ -1,0 +1,6 @@
+{
+  "name": "Building Sub-Meter Electricity Tracker",
+  "description": "Mobile-first electricity bill and building expenditure tracking app for buildings with 15 flats sharing one common meter, supporting secure PIN login, monthly expenditure logging, net savings vs out-of-pocket accounting, custom flat rates, UPI payments, and admin reading management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

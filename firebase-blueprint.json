@@ -1,0 +1,36 @@
+{
+  "entities": {
+    "BuildingSettings": {
+      "title": "BuildingSettings",
+      "description": "Building society profile and billing rules",
+      "type": "object",
+      "properties": {
+        "buildingName": { "type": "string" },
+        "address": { "type": "string" },
+        "societyUpiId": { "type": "string" },
+        "societyPayeeName": { "type": "string" }
+      }
+    },
+    "BillingCycle": {
+      "title": "BillingCycle",
+      "description": "Monthly electricity bills and flat meter readings",
+      "type": "object",
+      "properties": {
+        "month": { "type": "string" },
+        "monthKey": { "type": "string" },
+        "totalBilledAmount": { "type": "number" },
+        "totalCollectedAmount": { "type": "number" }
+      }
+    }
+  },
+  "firestore": {
+    "/buildings/{buildingId}": {
+      "schema": "BuildingSettings",
+      "description": "Settings for the society"
+    },
+    "/buildings/{buildingId}/cycles/{cycleId}": {
+      "schema": "BillingCycle",
+      "description": "Monthly sub-meter readings and bills"
+    }
+  }
+}
