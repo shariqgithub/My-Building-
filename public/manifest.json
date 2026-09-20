@@ -1,10 +1,10 @@
 {
-  "id": "/",
+  "id": "./",
   "name": "Building Sub-Meter Electricity Tracker",
   "short_name": "Flat Tracker",
   "description": "Mobile-first electricity bill and building expenditure tracking app for buildings with 15 flats sharing one common meter, supporting secure PIN login, monthly expenditure logging, net savings vs out-of-pocket accounting, custom flat rates, UPI payments, and admin reading management.",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "display_override": [
     "window-controls-overlay",
@@ -27,19 +27,19 @@
   "related_applications": [],
   "icons": [
     {
-      "src": "/pwa-192x192.png",
+      "src": "pwa-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/pwa-512x512.png",
+      "src": "pwa-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/pwa-maskable-512x512.png",
+      "src": "pwa-maskable-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
@@ -47,28 +47,28 @@
   ],
   "screenshots": [
     {
-      "src": "/screenshot-mobile.png",
+      "src": "screenshot-mobile.png",
       "sizes": "540x960",
       "type": "image/png",
       "form_factor": "narrow",
       "label": "Flat electricity sub-meter bill details and instant UPI payments"
     },
     {
-      "src": "/screenshot-mobile-2.png",
+      "src": "screenshot-mobile-2.png",
       "sizes": "540x960",
       "type": "image/png",
       "form_factor": "narrow",
       "label": "Direct UPI payment QR code and payment history breakdown"
     },
     {
-      "src": "/screenshot-desktop.png",
+      "src": "screenshot-desktop.png",
       "sizes": "1280x720",
       "type": "image/png",
       "form_factor": "wide",
       "label": "Secretary sub-meter readings and building maintenance ledger"
     },
     {
-      "src": "/screenshot-desktop-2.png",
+      "src": "screenshot-desktop-2.png",
       "sizes": "1280x720",
       "type": "image/png",
       "form_factor": "wide",
@@ -80,10 +80,10 @@
       "name": "Flat Bill",
       "short_name": "My Bill",
       "description": "View monthly electricity bill and pay via UPI",
-      "url": "/?action=bill",
+      "url": "./?action=bill",
       "icons": [
         {
-          "src": "/pwa-192x192.png",
+          "src": "pwa-192x192.png",
           "sizes": "192x192",
           "type": "image/png"
         }
@@ -93,10 +93,10 @@
       "name": "Quick UPI Pay",
       "short_name": "Pay UPI",
       "description": "Instant UPI payment for active electricity bill",
-      "url": "/?action=pay",
+      "url": "./?action=pay",
       "icons": [
         {
-          "src": "/pwa-192x192.png",
+          "src": "pwa-192x192.png",
           "sizes": "192x192",
           "type": "image/png"
         }
@@ -106,10 +106,10 @@
       "name": "Secretary Office",
       "short_name": "Admin",
       "description": "Building meter readings and expenditure ledger",
-      "url": "/?view=admin",
+      "url": "./?view=admin",
       "icons": [
         {
-          "src": "/pwa-192x192.png",
+          "src": "pwa-192x192.png",
           "sizes": "192x192",
           "type": "image/png"
         }
@@ -117,7 +117,7 @@
     }
   ],
   "share_target": {
-    "action": "/",
+    "action": "./",
     "method": "GET",
     "params": {
       "title": "title",
