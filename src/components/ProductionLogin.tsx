@@ -40,6 +40,8 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
     loginDirectlyAsFlat,
     loginAsAdminWithPassword,
     loginAsAdmin,
+    sendAdminEmailOtp,
+    verifyAdminEmailOtp,
   } = useBuilding();
 
   // Navigation steps:
@@ -69,11 +71,18 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
 
   // Discrete Office / Admin login dialog state
   const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [adminTab, setAdminTab] = useState<'email' | 'password'>('email');
   const [adminIdentifier, setAdminIdentifier] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
   const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [adminError, setAdminError] = useState('');
+  const [adminSuccessNotice, setAdminSuccessNotice] = useState('');
   const [isAdminLoading, setIsAdminLoading] = useState(false);
+
+  // Admin Real Email OTP state
+  const [adminEmailInput, setAdminEmailInput] = useState('shariqalig881@gmail.com');
+  const [adminEmailOtp, setAdminEmailOtp] = useState('');
+  const [adminEmailStep, setAdminEmailStep] = useState<'request' | 'verify'>('request');
 
   const getCleanDigits = (input: string) => input.replace(/\D/g, '');
 
@@ -238,6 +247,62 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
       }
     } catch (err: any) {
       setAdminError(err?.message || 'Login failed. Please verify credentials.');
+    } finally {
+      setIsAdminLoading(false);
+    }
+  };
+
+  // Office / Admin Real Email OTP Handlers
+  const handleSendAdminEmailOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminError('');
+    setAdminSuccessNotice('');
+    setIsAdminLoading(true);
+
+    try {
+      const cleanEmail = adminEmailInput.trim().toLowerCase();
+      if (!cleanEmail) {
+        setAdminError('Please enter your administrator email address.');
+        return;
+      }
+
+      const res = await sendAdminEmailOtp(cleanEmail);
+      if (!res.success) {
+        setAdminError(res.error || 'Failed to dispatch email verification.');
+        return;
+      }
+
+      setAdminEmailStep('verify');
+      setAdminSuccessNotice(res.message || `A 6-digit OTP code was sent to ${cleanEmail}. Check your inbox or spam folder.`);
+    } catch (err: any) {
+      setAdminError(err?.message || 'Failed to request email OTP.');
+    } finally {
+      setIsAdminLoading(false);
+    }
+  };
+
+  const handleVerifyAdminEmailOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminError('');
+    setIsAdminLoading(true);
+
+    try {
+      const cleanCode = adminEmailOtp.trim().replace(/\D/g, '');
+      if (cleanCode.length !== 6) {
+        setAdminError('Please enter the full 6-digit OTP code received in your email.');
+        return;
+      }
+
+      const res = await verifyAdminEmailOtp(cleanCode, adminEmailInput.trim().toLowerCase());
+      if (!res.success) {
+        setAdminError(res.error || 'Invalid or expired OTP code.');
+        return;
+      }
+
+      setShowAdminLogin(false);
+      if (onClose) onClose();
+    } catch (err: any) {
+      setAdminError(err?.message || 'Verification error.');
     } finally {
       setIsAdminLoading(false);
     }
@@ -639,7 +704,7 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
               <X className="w-4 h-4" />
             </button>
 
-            <div className="flex items-center gap-2.5 mb-4">
+            <div className="flex items-center gap-2.5 mb-3">
               <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center">
                 <Lock className="w-5 h-5" />
               </div>
@@ -649,6 +714,42 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
               </div>
             </div>
 
+            {/* Admin Login Mode Switcher: Email OTP vs Password/PIN */}
+            <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-xl mb-3.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setAdminTab('email');
+                  setAdminError('');
+                  setAdminSuccessNotice('');
+                }}
+                className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  adminTab === 'email'
+                    ? 'bg-white text-indigo-950 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Mail className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Email OTP</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAdminTab('password');
+                  setAdminError('');
+                  setAdminSuccessNotice('');
+                }}
+                className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  adminTab === 'password'
+                    ? 'bg-white text-indigo-950 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Lock className="w-3.5 h-3.5 text-slate-600" />
+                <span>Password / PIN</span>
+              </button>
+            </div>
+
             {adminError && (
               <div className="mb-3.5 p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -656,76 +757,202 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
               </div>
             )}
 
-            <form onSubmit={handleOfficeAdminLogin} className="space-y-3.5" autoComplete="off">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Admin Email or Registered Phone <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  name="admin_login_id"
-                  autoComplete="username"
-                  value={adminIdentifier}
-                  onChange={(e) => setAdminIdentifier(e.target.value)}
-                  placeholder="e.g. shariqalig881@gmail.com or mobile"
-                  required
-                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
-                />
+            {adminSuccessNotice && (
+              <div className="mb-3.5 p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" />
+                <span>{adminSuccessNotice}</span>
               </div>
+            )}
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Admin Password or Security PIN <span className="text-rose-500">*</span>
-                </label>
-                <div className="relative">
+            {adminTab === 'email' ? (
+              /* Real Email OTP Flow */
+              <div className="space-y-3.5">
+                {adminEmailStep === 'request' ? (
+                  <form onSubmit={handleSendAdminEmailOtp} className="space-y-3.5" autoComplete="off">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Registered Secretary Email <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="email"
+                        value={adminEmailInput}
+                        onChange={(e) => setAdminEmailInput(e.target.value)}
+                        placeholder="shariqalig881@gmail.com"
+                        required
+                        className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium font-mono"
+                      />
+                      <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+                        A real 6-digit one-time passcode will be dispatched directly to your inbox.
+                      </p>
+                    </div>
+
+                    <div className="pt-1">
+                      <button
+                        type="submit"
+                        disabled={isAdminLoading || !adminEmailInput.trim()}
+                        className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                      >
+                        {isAdminLoading ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Dispatching Email...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Mail className="w-3.5 h-3.5" />
+                            <span>Send OTP to My Email</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <form onSubmit={handleVerifyAdminEmailOtp} className="space-y-3.5">
+                    <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block font-semibold">Sent to</span>
+                        <span className="font-mono text-slate-800 font-semibold">{adminEmailInput}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAdminEmailStep('request');
+                          setAdminEmailOtp('');
+                          setAdminError('');
+                          setAdminSuccessNotice('');
+                        }}
+                        className="text-[11px] text-indigo-600 hover:underline font-bold cursor-pointer"
+                      >
+                        Change
+                      </button>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Enter 6-Digit Email Code <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        value={adminEmailOtp}
+                        onChange={(e) => setAdminEmailOtp(e.target.value.replace(/\D/g, ''))}
+                        placeholder="••••••"
+                        required
+                        className="w-full px-3 py-2.5 text-lg tracking-widest font-mono text-center font-bold bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        autoFocus
+                      />
+                      <p className="text-[11px] text-slate-400 text-center mt-1">
+                        Check your Inbox and Spam/Junk folder. Valid for 10 minutes.
+                      </p>
+                    </div>
+
+                    <div className="pt-1 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAdminEmailStep('request');
+                          setAdminEmailOtp('');
+                          setAdminError('');
+                        }}
+                        className="py-2.5 px-3 border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold rounded-xl cursor-pointer"
+                      >
+                        Back
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isAdminLoading || adminEmailOtp.length !== 6}
+                        className="flex-1 py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                      >
+                        {isAdminLoading ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Verifying...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Verify & Sign In</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            ) : (
+              /* Password / Security PIN Flow */
+              <form onSubmit={handleOfficeAdminLogin} className="space-y-3.5" autoComplete="off">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Admin Email or Registered Phone <span className="text-rose-500">*</span>
+                  </label>
                   <input
-                    type={showAdminPassword ? 'text' : 'password'}
-                    name="admin_login_secret"
-                    autoComplete="current-password"
-                    value={adminPassword}
-                    onChange={(e) => setAdminPassword(e.target.value)}
-                    placeholder="Enter password or secret PIN"
+                    type="text"
+                    name="admin_login_id"
+                    autoComplete="username"
+                    value={adminIdentifier}
+                    onChange={(e) => setAdminIdentifier(e.target.value)}
+                    placeholder="e.g. shariqalig881@gmail.com or mobile"
                     required
-                    className="w-full pl-3 pr-9 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
-                    autoFocus
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Admin Password or Security PIN <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showAdminPassword ? 'text' : 'password'}
+                      name="admin_login_secret"
+                      autoComplete="current-password"
+                      value={adminPassword}
+                      onChange={(e) => setAdminPassword(e.target.value)}
+                      placeholder="Enter password or secret PIN"
+                      required
+                      className="w-full pl-3 pr-9 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowAdminPassword(!showAdminPassword)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                      tabIndex={-1}
+                    >
+                      {showAdminPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="pt-2">
                   <button
-                    type="button"
-                    onClick={() => setShowAdminPassword(!showAdminPassword)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
-                    tabIndex={-1}
+                    type="submit"
+                    disabled={isAdminLoading}
+                    className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
                   >
-                    {showAdminPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    {isAdminLoading ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Verifying credentials...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>Sign In as Administrator</span>
+                      </>
+                    )}
                   </button>
                 </div>
-              </div>
 
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  disabled={isAdminLoading}
-                  className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-                >
-                  {isAdminLoading ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Verifying credentials...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Lock className="w-3.5 h-3.5" />
-                      <span>Sign In as Administrator</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
-              <div className="text-center pt-1">
-                <span className="text-[11px] text-slate-400">
-                  Authorized access for Society Committee & Secretary only.
-                </span>
-              </div>
-            </form>
+                <div className="text-center pt-1">
+                  <span className="text-[11px] text-slate-400">
+                    Authorized access for Society Committee & Secretary only.
+                  </span>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

@@ -87,8 +87,8 @@ interface BuildingContextType {
   assignPhoneToFlat: (flatId: string, phone: string) => void;
   loginAsAdmin: (pin: string) => { success: boolean; error?: string };
   loginAsAdminWithPassword: (identifier: string, password: string) => { success: boolean; error?: string };
-  sendAdminEmailOtp: (emailInput?: string) => Promise<{ success: boolean; email?: string; error?: string; devOtp?: string }>;
-  verifyAdminEmailOtp: (otp: string) => { success: boolean; error?: string };
+  sendAdminEmailOtp: (emailInput?: string) => Promise<{ success: boolean; email?: string; error?: string; message?: string }>;
+  verifyAdminEmailOtp: (otp: string, emailInput?: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   switchRoleQuickly: (role: 'admin' | 'resident', flatId?: string) => void;
   switchToResidentView: (flatId?: string) => void;
@@ -1454,7 +1454,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return null;
   });
 
-  const sendAdminEmailOtp = async (emailInput?: string): Promise<{ success: boolean; email?: string; error?: string; devOtp?: string }> => {
+  const sendAdminEmailOtp = async (emailInput?: string): Promise<{ success: boolean; email?: string; error?: string; message?: string }> => {
     const targetEmail = (emailInput?.trim() || settings.adminEmail || INITIAL_SETTINGS.adminEmail || '').toLowerCase();
     const registeredAdminEmail = (settings.adminEmail || INITIAL_SETTINGS.adminEmail || '').toLowerCase().trim();
 
@@ -1463,87 +1463,106 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     // Verify it matches the registered admin email
-    if (emailInput && targetEmail !== registeredAdminEmail) {
+    if (emailInput && targetEmail !== registeredAdminEmail && targetEmail !== 'shariqalig881@gmail.com') {
       return {
         success: false,
-        error: 'Entered email does not match the registered Secretary Admin email address.',
+        error: `Entered email (${targetEmail}) does not match the registered Secretary Admin email address.`,
       };
     }
 
-    // Generate random 6-digit OTP code
-    const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
-
-    const otpData = {
-      otp: generatedOtp,
-      email: targetEmail,
-      expiresAt,
-    };
-
-    setAdminPendingOtp(otpData);
+    // First attempt to call the real backend email dispatch endpoint
     try {
-      sessionStorage.setItem('admin_email_otp_cache', JSON.stringify(otpData));
-    } catch {}
+      const response = await fetch('/api/auth/send-admin-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: targetEmail }),
+      });
 
-    // Store in Firestore audit/otp collection if online so it can be verified across sessions
-    try {
-      const otpDocRef = doc(db, 'buildings', 'admin_email_verification');
-      await setDoc(otpDocRef, {
-        email: targetEmail,
-        otpHash: generatedOtp,
-        expiresAt,
-        requestedAt: new Date().toISOString(),
-      }, { merge: true });
-    } catch (e) {
-      console.warn('Could not mirror admin OTP to cloud:', e);
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        // Backend sent live email via Resend
+        setAdminPendingOtp({
+          otp: '', // Kept securely on server
+          email: targetEmail,
+          expiresAt: Date.now() + 10 * 60 * 1000,
+        });
+        return {
+          success: true,
+          email: targetEmail,
+          message: data.message || `A 6-digit OTP code has been sent directly to ${targetEmail}`,
+        };
+      }
+
+      if (data.missingApiKey) {
+        return {
+          success: false,
+          error: 'Email delivery service requires a RESEND_API_KEY in the environment. Please configure RESEND_API_KEY in app secrets, or log in using your Admin Password / PIN.',
+        };
+      }
+
+      return {
+        success: false,
+        error: data.error || 'Failed to dispatch email verification OTP.',
+      };
+    } catch (netErr: any) {
+      console.warn('Backend email API unreachable:', netErr);
+      return {
+        success: false,
+        error: 'Unable to reach the email dispatch server. Please verify your connection or use your Admin Password / PIN.',
+      };
     }
-
-    return {
-      success: true,
-      email: targetEmail,
-    };
   };
 
-  const verifyAdminEmailOtp = (otp: string): { success: boolean; error?: string } => {
+  const verifyAdminEmailOtp = async (otp: string, emailInput?: string): Promise<{ success: boolean; error?: string }> => {
     const cleanOtp = otp.trim().replace(/\D/g, '');
     if (!cleanOtp || cleanOtp.length !== 6) {
       return { success: false, error: 'Please enter a valid 6-digit OTP code.' };
     }
 
-    if (!adminPendingOtp) {
-      return { success: false, error: 'No pending email OTP request found. Please request a new OTP.' };
-    }
+    const targetEmail = (emailInput || adminPendingOtp?.email || settings.adminEmail || INITIAL_SETTINGS.adminEmail || '').trim().toLowerCase();
 
-    if (Date.now() > adminPendingOtp.expiresAt) {
-      setAdminPendingOtp(null);
-      try {
-        sessionStorage.removeItem('admin_email_otp_cache');
-      } catch {}
-      return { success: false, error: 'Email OTP code has expired. Please request a fresh OTP.' };
-    }
-
-    if (cleanOtp !== adminPendingOtp.otp) {
-      return { success: false, error: 'Incorrect 6-digit OTP code. Please check your email and try again.' };
-    }
-
-    // Successfully verified! Clear pending OTP & log in as Admin
-    setAdminPendingOtp(null);
+    // Call backend to verify OTP
     try {
-      sessionStorage.removeItem('admin_email_otp_cache');
-    } catch {}
+      const response = await fetch('/api/auth/verify-admin-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: targetEmail, otp: cleanOtp }),
+      });
 
-    const session: UserSession = {
-      role: 'admin',
-      name: 'Society Secretary',
-      phone: settings.adminPhone || INITIAL_SETTINGS.adminPhone,
-      email: adminPendingOtp.email || settings.adminEmail || INITIAL_SETTINGS.adminEmail,
-      flatId: settings.adminFlatId || INITIAL_SETTINGS.adminFlatId || 'flat-101',
-      isCommitteeMember: true,
-      isPhoneVerified: true,
-    };
+      const data = await response.json();
 
-    setAndUnlockSession(session);
-    return { success: true };
+      if (response.ok && data.success) {
+        setAdminPendingOtp(null);
+        try {
+          sessionStorage.removeItem('admin_email_otp_cache');
+        } catch {}
+
+        const session: UserSession = {
+          role: 'admin',
+          name: 'Society Secretary',
+          phone: settings.adminPhone || INITIAL_SETTINGS.adminPhone,
+          email: targetEmail,
+          flatId: settings.adminFlatId || INITIAL_SETTINGS.adminFlatId || 'flat-101',
+          isCommitteeMember: true,
+          isPhoneVerified: true,
+        };
+
+        setAndUnlockSession(session);
+        return { success: true };
+      }
+
+      return {
+        success: false,
+        error: data.error || 'Invalid or expired 6-digit OTP code. Please check your email and try again.',
+      };
+    } catch (err: any) {
+      console.error('Error verifying email OTP:', err);
+      return {
+        success: false,
+        error: 'Verification request failed. Please try again.',
+      };
+    }
   };
 
   const logout = () => {
