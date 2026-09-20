@@ -5,8 +5,10 @@
     ],
     "target": {
       "namespace": "android_app",
-      "package_name": "app.building.submeter",
-      "sha256_cert_fingerprints": []
+      "package_name": "io.github.shariqgithub.twa",
+      "sha256_cert_fingerprints": [
+        "FD:AB:0C:4C:73:AF:72:90:92:24:23:A8:6F:51:E1:42:37:9D:1F:09:64:29:91:E3:E1:7D:F0:36:60:7A:98:D5"
+      ]
     }
   }
 ]
