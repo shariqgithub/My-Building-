@@ -1,14 +1,13 @@
 import express from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { Resend } from 'resend';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Determine directory safely in both ESM (tsx) and bundled CJS (dist/server.cjs) environments
+const rootDir = process.cwd();
 
 async function startServer() {
   const app = express();
