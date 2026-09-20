@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useBuilding } from '../context/BuildingContext';
 import { UpiPaymentModal } from './UpiPaymentModal';
 import { BillInvoiceModal } from './BillInvoiceModal';
-import { PWAInstallButton } from './PWAInstallButton';
 import {
   Zap,
   Home,
@@ -97,7 +96,6 @@ export const ResidentDashboard: React.FC = () => {
             <KeyRound className="w-3.5 h-3.5 text-slate-500" />
             <span className="hidden sm:inline">Change PIN</span>
           </button>
-          <PWAInstallButton variant="banner" />
           <div className="hidden sm:block text-right">
             <span className="text-[10px] text-slate-400 font-semibold uppercase block">Billing Month</span>
             <span className="text-xs font-bold text-slate-800">{activeCycle.month}</span>

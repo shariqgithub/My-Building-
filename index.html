@@ -20,15 +20,6 @@
     <meta property="og:description" content="Mobile-first electricity bill and building expenditure tracking app for buildings with 15 flats sharing one common meter, supporting secure PIN login, monthly expenditure logging, net savings vs out-of-pocket accounting, custom flat rates, UPI payments, and admin reading management." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
-    <script>
-      // Immediate service worker registration for PWA and PWABuilder audit
-      if ('serviceWorker' in navigator) {
-        const swUrl = new URL('sw.js', window.location.href).pathname;
-        navigator.serviceWorker.register(swUrl)
-          .then(function(reg) { console.log('SW active:', reg.scope); })
-          .catch(function(err) { console.warn('SW error:', err); });
-      }
-    </script>
   </head>
   <body>
     <div id="root"></div>

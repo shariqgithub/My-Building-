@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { db } from '../lib/firebase';
+import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import {
   FlatInfo,
@@ -94,9 +94,16 @@ interface BuildingContextType {
   switchToResidentView: (flatId?: string) => void;
   switchToAdminView: () => void;
   isCommitteeMember: boolean;
+  isAppLocked: boolean;
+  lockReason: 'killed' | 'inactivity' | 'manual' | null;
+  lockApp: (reason?: 'inactivity' | 'manual') => void;
+  unlockAppWithPin: (pin: string) => { success: boolean; error?: string; requiresPinSetup?: boolean };
+  unlockAppDirectly: () => void;
   addNotification: (title: string, message: string, type: AppNotification['type'], targetFlatId?: string) => void;
   markAllNotificationsRead: () => void;
   resetAllData: () => void;
+  exportBackupJson: () => string;
+  importBackupJson: (jsonStr: string) => { success: boolean; message: string };
 }
 
 /**
@@ -206,7 +213,12 @@ const STORAGE_KEYS = {
   SESSION: 'bijli_session_v1',
   EXPENSES: 'bijli_expenses_v1',
   MANUAL_COLLECTIONS: 'bijli_manual_collections_v1',
+  SESSION_UNLOCKED: 'bijli_session_unlocked_v1',
+  LAST_ACTIVE: 'bijli_last_active_time_v1',
 };
+
+// Auto-lock after 10 minutes of inactivity
+const AUTO_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
 
 const BuildingContext = createContext<BuildingContextType | undefined>(undefined);
 
@@ -325,6 +337,58 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   });
 
+  // App Lock State: Ask for PIN if app is killed / newly opened, and auto-lock after 10 min inactivity
+  const [isAppLocked, setIsAppLocked] = useState<boolean>(() => {
+    try {
+      const savedSession = localStorage.getItem(STORAGE_KEYS.SESSION);
+      if (!savedSession) return false;
+      const parsed = JSON.parse(savedSession);
+      if (!parsed || (!parsed.isPhoneVerified && !parsed.role)) return false;
+
+      // User has an existing saved account in localStorage
+      // Check if current browser session / tab was unlocked via sessionStorage
+      const isUnlockedInThisSession = sessionStorage.getItem(STORAGE_KEYS.SESSION_UNLOCKED) === 'true';
+      if (!isUnlockedInThisSession) {
+        // App was killed or fresh tab opened -> must ask for PIN
+        return true;
+      }
+
+      // If unlocked in current tab, check if 10 minutes of inactivity passed
+      const lastActiveStr = localStorage.getItem(STORAGE_KEYS.LAST_ACTIVE);
+      const lastActive = lastActiveStr ? Number(lastActiveStr) : 0;
+      if (lastActive && Date.now() - lastActive >= AUTO_LOCK_TIMEOUT_MS) {
+        sessionStorage.removeItem(STORAGE_KEYS.SESSION_UNLOCKED);
+        return true;
+      }
+
+      return false;
+    } catch {
+      return false;
+    }
+  });
+
+  const [lockReason, setLockReason] = useState<'killed' | 'inactivity' | 'manual' | null>(() => {
+    try {
+      const savedSession = localStorage.getItem(STORAGE_KEYS.SESSION);
+      if (!savedSession) return null;
+      const isUnlockedInThisSession = sessionStorage.getItem(STORAGE_KEYS.SESSION_UNLOCKED) === 'true';
+      if (!isUnlockedInThisSession) {
+        return 'killed';
+      }
+      const lastActiveStr = localStorage.getItem(STORAGE_KEYS.LAST_ACTIVE);
+      const lastActive = lastActiveStr ? Number(lastActiveStr) : 0;
+      if (lastActive && Date.now() - lastActive >= AUTO_LOCK_TIMEOUT_MS) {
+        return 'inactivity';
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  });
+
+  const lastActiveRef = useRef<number>(Date.now());
+  const lastLocalActiveWriteRef = useRef<number>(Date.now());
+
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'connected' | 'syncing' | 'offline'>('syncing');
   const [lastCloudSync, setLastCloudSync] = useState<Date | null>(null);
   const isLocalSavingRef = useRef<boolean>(false);
@@ -398,7 +462,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                   setLastCloudSync(new Date());
                 })
                 .catch((err) => {
-                  console.warn('Firestore initial sync error:', err);
+                  handleFirestoreError(err, OperationType.WRITE, 'buildings/main_society');
                   setCloudSyncStatus('offline');
                 });
             } catch (e) {
@@ -408,12 +472,12 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           }
         },
         (error) => {
-          console.warn('Firestore snapshot error:', error);
+          handleFirestoreError(error, OperationType.GET, 'buildings/main_society');
           setCloudSyncStatus('offline');
         }
       );
     } catch (err) {
-      console.warn('Firestore listener setup error:', err);
+      handleFirestoreError(err, OperationType.GET, 'buildings/main_society');
       setCloudSyncStatus('offline');
     }
 
@@ -452,7 +516,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setLastCloudSync(new Date());
       return true;
     } catch (e) {
-      console.error('saveToCloud error:', e);
+      handleFirestoreError(e, OperationType.WRITE, 'buildings/main_society');
       setCloudSyncStatus('offline');
       return false;
     } finally {
@@ -535,6 +599,139 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       console.error(e);
     }
   }, [currentSession]);
+
+  // Helper to establish an authenticated session and unlock the screen
+  const setAndUnlockSession = (newSession: UserSession | null) => {
+    setCurrentSession(newSession);
+    if (newSession) {
+      try {
+        sessionStorage.setItem(STORAGE_KEYS.SESSION_UNLOCKED, 'true');
+        localStorage.setItem(STORAGE_KEYS.LAST_ACTIVE, Date.now().toString());
+      } catch {}
+      lastActiveRef.current = Date.now();
+      setIsAppLocked(false);
+      setLockReason(null);
+    } else {
+      try {
+        sessionStorage.removeItem(STORAGE_KEYS.SESSION_UNLOCKED);
+      } catch {}
+      setIsAppLocked(false);
+      setLockReason(null);
+    }
+  };
+
+  const lockApp = (reason: 'inactivity' | 'manual' = 'inactivity') => {
+    if (!currentSession) return;
+    setIsAppLocked(true);
+    setLockReason(reason);
+    try {
+      sessionStorage.removeItem(STORAGE_KEYS.SESSION_UNLOCKED);
+    } catch {}
+  };
+
+  const unlockAppDirectly = () => {
+    try {
+      sessionStorage.setItem(STORAGE_KEYS.SESSION_UNLOCKED, 'true');
+      localStorage.setItem(STORAGE_KEYS.LAST_ACTIVE, Date.now().toString());
+    } catch {}
+    lastActiveRef.current = Date.now();
+    setIsAppLocked(false);
+    setLockReason(null);
+  };
+
+  const unlockAppWithPin = (enteredPin: string): { success: boolean; error?: string; requiresPinSetup?: boolean } => {
+    if (!currentSession) {
+      return { success: false, error: 'No active user session found.' };
+    }
+
+    const trimmed = enteredPin.trim();
+    if (!trimmed) {
+      return { success: false, error: 'Please enter your security PIN.' };
+    }
+
+    // Admin / Secretary Unlock
+    if (currentSession.role === 'admin' || currentSession.isCommitteeMember) {
+      const configuredPin = settings.adminPin?.trim() || INITIAL_SETTINGS.adminPin?.trim() || '1234';
+      const configuredPwd = settings.adminPassword || INITIAL_SETTINGS.adminPassword || 'My1Build2@3';
+
+      if (trimmed === configuredPin || trimmed === configuredPwd) {
+        unlockAppDirectly();
+        return { success: true };
+      }
+      return { success: false, error: 'Incorrect Admin PIN. Default PIN is 1234.' };
+    }
+
+    // Resident Flat Unlock
+    const targetFlat = flats.find((f) => f.id === currentSession.flatId) ||
+      flats.find((f) => f.phone && currentSession.phone && f.phone.replace(/\D/g, '') === currentSession.phone.replace(/\D/g, ''));
+
+    if (!targetFlat) {
+      return { success: false, error: 'Registered flat record could not be found.' };
+    }
+
+    if (!targetFlat.pin || targetFlat.pin.trim().length === 0) {
+      return {
+        success: false,
+        requiresPinSetup: true,
+        error: 'No PIN set yet for this flat. Please set a 4-digit PIN.',
+      };
+    }
+
+    if (targetFlat.pin !== trimmed) {
+      return { success: false, error: 'Incorrect PIN. Please re-enter carefully.' };
+    }
+
+    unlockAppDirectly();
+    return { success: true };
+  };
+
+  // Inactivity Auto-Lock Effect: 10 minutes idle timeout & background/visibility checks
+  useEffect(() => {
+    if (!currentSession || isAppLocked) return;
+
+    const handleUserActivity = () => {
+      const now = Date.now();
+      lastActiveRef.current = now;
+      if (now - lastLocalActiveWriteRef.current > 5000) {
+        lastLocalActiveWriteRef.current = now;
+        try {
+          localStorage.setItem(STORAGE_KEYS.LAST_ACTIVE, now.toString());
+        } catch {}
+      }
+    };
+
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'];
+    events.forEach((evt) => window.addEventListener(evt, handleUserActivity, { passive: true }));
+
+    // Periodic check every 5 seconds for 10-minute inactivity
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const elapsed = now - lastActiveRef.current;
+      if (elapsed >= AUTO_LOCK_TIMEOUT_MS) {
+        lockApp('inactivity');
+      }
+    }, 5000);
+
+    // Tab visibility & focus change check (when returning to app after tab backgrounded or phone unlocked)
+    const handleVisibilityOrFocus = () => {
+      const lastSaved = Number(localStorage.getItem(STORAGE_KEYS.LAST_ACTIVE) || lastActiveRef.current);
+      if (Date.now() - lastSaved >= AUTO_LOCK_TIMEOUT_MS) {
+        lockApp('inactivity');
+      } else {
+        handleUserActivity();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    return () => {
+      events.forEach((evt) => window.removeEventListener(evt, handleUserActivity));
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+    };
+  }, [currentSession, isAppLocked]);
 
   const activeCycle = cycles.find((c) => c.id === activeCycleId) || cycles[0];
 
@@ -1055,7 +1252,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           isCommitteeMember: true,
           isPhoneVerified: true,
         };
-        setCurrentSession(session);
+        setAndUnlockSession(session);
         return { success: true, role: 'admin' as const };
       } else {
         return { success: false, error: 'Incorrect Admin PIN or password.' };
@@ -1099,7 +1296,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       name: matchedFlat.ownerName,
       isPhoneVerified: true,
     };
-    setCurrentSession(session);
+    setAndUnlockSession(session);
     return { success: true, flat: matchedFlat, role: 'resident' as const };
   };
 
@@ -1123,7 +1320,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         isCommitteeMember: true,
         isPhoneVerified: true,
       };
-      setCurrentSession(session);
+      setAndUnlockSession(session);
       return { success: true, role: 'admin' as const };
     }
 
@@ -1146,7 +1343,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       name: matchedFlat.ownerName,
       isPhoneVerified: true,
     };
-    setCurrentSession(session);
+    setAndUnlockSession(session);
     return { success: true, flat: matchedFlat, role: 'resident' as const };
   };
 
@@ -1160,7 +1357,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       name: targetFlat.ownerName,
       isPhoneVerified: true,
     };
-    setCurrentSession(session);
+    setAndUnlockSession(session);
     return { success: true, flat: targetFlat };
   };
 
@@ -1184,7 +1381,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         isCommitteeMember: true,
         isPhoneVerified: true,
       };
-      setCurrentSession(session);
+      setAndUnlockSession(session);
       return { success: true };
     }
     return { success: false, error: 'Incorrect credentials.' };
@@ -1236,7 +1433,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       isCommitteeMember: true,
       isPhoneVerified: true,
     };
-    setCurrentSession(session);
+    setAndUnlockSession(session);
     return { success: true };
   };
 
@@ -1342,14 +1539,17 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       isPhoneVerified: true,
     };
 
-    setCurrentSession(session);
+    setAndUnlockSession(session);
     return { success: true };
   };
 
   const logout = () => {
     setCurrentSession(null);
+    setIsAppLocked(false);
+    setLockReason(null);
     try {
       localStorage.removeItem(STORAGE_KEYS.SESSION);
+      sessionStorage.removeItem(STORAGE_KEYS.SESSION_UNLOCKED);
     } catch {}
   };
 
@@ -1360,7 +1560,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const switchToResidentView = (targetFlatId?: string) => {
     const flatIdToUse = targetFlatId || currentSession?.flatId || settings.adminFlatId || flats[0]?.id || 'flat-101';
     const targetFlat = flats.find((f) => f.id === flatIdToUse) || flats[0];
-    setCurrentSession({
+    setAndUnlockSession({
       role: 'resident',
       flatId: targetFlat.id,
       flatNumber: targetFlat.flatNumber,
@@ -1372,7 +1572,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const switchToAdminView = () => {
-    setCurrentSession({
+    setAndUnlockSession({
       role: 'admin',
       name: 'Society Secretary',
       phone: settings.adminPhone || INITIAL_SETTINGS.adminPhone,
@@ -1474,12 +1674,75 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setNotifications(INITIAL_NOTIFICATIONS);
     setExpenses(INITIAL_EXPENSES);
     setMonthlyManualCollections({});
-    setCurrentSession({
+    setAndUnlockSession({
       role: 'admin',
       name: 'Society Secretary',
       phone: INITIAL_SETTINGS.adminPhone,
     });
-    localStorage.clear();
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch {}
+  };
+
+  const exportBackupJson = (): string => {
+    const backup = {
+      app: 'building-submeter-tracker',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      settings,
+      flats,
+      cycles,
+      activeCycleId,
+      expenses,
+      monthlyManualCollections,
+    };
+    return JSON.stringify(backup, null, 2);
+  };
+
+  const importBackupJson = (jsonStr: string): { success: boolean; message: string } => {
+    try {
+      const data = JSON.parse(jsonStr);
+      if (!data || (!data.flats && !data.settings)) {
+        return { success: false, message: 'Invalid backup file format: Missing flat/setting data.' };
+      }
+      if (data.settings) {
+        setSettings(data.settings);
+        localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(data.settings));
+      }
+      if (Array.isArray(data.flats) && data.flats.length > 0) {
+        setFlats(data.flats);
+        localStorage.setItem(STORAGE_KEYS.FLATS, JSON.stringify(data.flats));
+      }
+      if (Array.isArray(data.cycles) && data.cycles.length > 0) {
+        const synced = syncCycleBalances(data.cycles);
+        setCycles(synced);
+        localStorage.setItem(STORAGE_KEYS.CYCLES, JSON.stringify(synced));
+      }
+      if (data.activeCycleId) {
+        setActiveCycleId(data.activeCycleId);
+      }
+      if (Array.isArray(data.expenses)) {
+        setExpenses(data.expenses);
+        localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(data.expenses));
+      }
+      if (data.monthlyManualCollections && typeof data.monthlyManualCollections === 'object') {
+        setMonthlyManualCollections(data.monthlyManualCollections);
+        localStorage.setItem(STORAGE_KEYS.MANUAL_COLLECTIONS, JSON.stringify(data.monthlyManualCollections));
+      }
+      // Save to cloud if available
+      saveToCloud(
+        data.settings || settings,
+        data.flats || flats,
+        data.cycles || cycles,
+        data.activeCycleId || activeCycleId,
+        data.expenses || expenses,
+        data.monthlyManualCollections || monthlyManualCollections
+      );
+      return { success: true, message: 'Backup successfully imported! All flats and details updated.' };
+    } catch (err) {
+      return { success: false, message: 'Failed to read backup file: ' + (err instanceof Error ? err.message : String(err)) };
+    }
   };
 
   return (
@@ -1530,9 +1793,16 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         switchToResidentView,
         switchToAdminView,
         isCommitteeMember,
+        isAppLocked,
+        lockReason,
+        lockApp,
+        unlockAppWithPin,
+        unlockAppDirectly,
         addNotification,
         markAllNotificationsRead,
         resetAllData,
+        exportBackupJson,
+        importBackupJson,
       }}
     >
       {children}

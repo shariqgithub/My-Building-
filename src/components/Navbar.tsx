@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
 import { useBuilding } from '../context/BuildingContext';
 import { EditBuildingModal } from './EditBuildingModal';
-import { PWAInstallButton } from './PWAInstallButton';
-import { AndroidInstallModal } from './AndroidInstallModal';
 import {
   Zap,
   Bell,
@@ -15,12 +13,12 @@ import {
   X,
   ChevronDown,
   Edit3,
-  Smartphone,
   ArrowRightLeft,
+  Lock,
 } from 'lucide-react';
 
 interface NavbarProps {
-  onOpenLogin: () => void;
+  onOpenLogin?: () => void;
   isMobileFrame: boolean;
   setIsMobileFrame: (val: boolean) => void;
 }
@@ -44,6 +42,8 @@ export const Navbar: React.FC<NavbarProps> = ({
     switchToResidentView,
     switchToAdminView,
     isCommitteeMember,
+    isAppLocked,
+    lockApp,
     markAllNotificationsRead,
     updateSettings,
     cloudSyncStatus,
@@ -52,7 +52,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [showNotifs, setShowNotifs] = useState(false);
   const [showRoleMenu, setShowRoleMenu] = useState(false);
   const [showEditBuildingModal, setShowEditBuildingModal] = useState(false);
-  const [showInstallModal, setShowInstallModal] = useState(false);
 
   const requestPushPermission = async () => {
     if ('Notification' in window) {
@@ -144,12 +143,9 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           )}
 
-          {/* PWA / Android Install Button */}
-          <PWAInstallButton variant="nav" />
-
           {/* Cloud Sync Status Indicator */}
           <div
-            className={`hidden lg:inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-lg border ${
+            className={`inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-lg border ${
               cloudSyncStatus === 'connected'
                 ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                 : cloudSyncStatus === 'syncing'
@@ -159,15 +155,27 @@ export const Navbar: React.FC<NavbarProps> = ({
             title={
               cloudSyncStatus === 'connected'
                 ? 'Cloud Firestore Connected: All resident names, numbers, and bills are automatically synchronized across all devices.'
-                : 'Connecting to Cloud Database...'
+                : cloudSyncStatus === 'syncing'
+                ? 'Connecting to Cloud Database...'
+                : 'Local Storage Active: Changes are saved on this phone/browser. Publish Firebase rules to sync across all phones in real-time.'
             }
           >
             <span
               className={`w-2 h-2 rounded-full ${
-                cloudSyncStatus === 'connected' ? 'bg-emerald-500' : 'bg-amber-400 animate-pulse'
+                cloudSyncStatus === 'connected'
+                  ? 'bg-emerald-500'
+                  : cloudSyncStatus === 'syncing'
+                  ? 'bg-amber-400 animate-pulse'
+                  : 'bg-slate-400'
               }`}
             />
-            <span>{cloudSyncStatus === 'connected' ? 'Cloud Synced' : 'Syncing...'}</span>
+            <span className="hidden sm:inline">
+              {cloudSyncStatus === 'connected'
+                ? 'Cloud Synced'
+                : cloudSyncStatus === 'syncing'
+                ? 'Syncing...'
+                : 'Local Storage'}
+            </span>
           </div>
 
           {/* Desktop/Mobile Preview Toggle */}
@@ -251,6 +259,28 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
               )}
             </div>
+          )}
+
+          {/* Manual Lock Screen Button */}
+          {currentSession && (
+            isAppLocked ? (
+              <div
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold"
+                title="Application is locked"
+              >
+                <Lock className="w-3.5 h-3.5 text-amber-600" />
+                <span className="hidden sm:inline">Locked</span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => lockApp('manual')}
+                className="relative p-1.5 sm:p-2 rounded-lg text-slate-600 hover:bg-slate-100 border border-transparent hover:border-slate-200 transition-colors cursor-pointer"
+                title="Lock Screen Now (Auto-locks after 10 min inactivity)"
+              >
+                <Lock className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+              </button>
+            )
           )}
 
           {/* User / Role Switcher Pill */}
@@ -342,17 +372,15 @@ export const Navbar: React.FC<NavbarProps> = ({
                           type="button"
                           onClick={() => {
                             setShowRoleMenu(false);
-                            setShowInstallModal(true);
+                            lockApp('manual');
                           }}
-                          className="w-full flex items-center justify-between text-xs text-emerald-700 hover:bg-emerald-50 px-2 py-1.5 rounded-md font-medium transition-colors"
+                          className="w-full flex items-center justify-between text-xs text-slate-700 hover:bg-slate-50 px-2 py-1.5 rounded-md font-medium transition-colors cursor-pointer"
                         >
                           <span className="flex items-center gap-1.5">
-                            <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
-                            Install App on Android Phone
+                            <Lock className="w-3.5 h-3.5 text-slate-500" />
+                            Lock Screen Now
                           </span>
-                          <span className="text-[10px] text-emerald-600 bg-emerald-100 px-1.5 py-0.5 rounded font-bold">
-                            Free
-                          </span>
+                          <span className="text-[10px] text-slate-400">10m auto</span>
                         </button>
 
                         <button
@@ -360,7 +388,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                           onClick={() => {
                             logout();
                             setShowRoleMenu(false);
-                            onOpenLogin();
+                            onOpenLogin?.();
                           }}
                           className="w-full flex items-center gap-1.5 text-xs text-rose-600 hover:bg-rose-50 px-2 py-1.5 rounded-md font-medium transition-colors"
                         >
@@ -438,24 +466,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                           type="button"
                           onClick={() => {
                             setShowRoleMenu(false);
-                            setShowInstallModal(true);
+                            lockApp('manual');
                           }}
-                          className="w-full flex items-center justify-between text-xs text-emerald-700 hover:bg-emerald-50 px-2 py-1.5 rounded-md font-medium transition-colors"
+                          className="w-full flex items-center justify-between text-xs text-slate-700 hover:bg-slate-50 px-2 py-1.5 rounded-md font-medium transition-colors cursor-pointer"
                         >
                           <span className="flex items-center gap-1.5">
-                            <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
-                            Install App / Package for Residents
+                            <Lock className="w-3.5 h-3.5 text-slate-500" />
+                            Lock Screen Now
                           </span>
-                          <span className="text-[10px] text-emerald-600 bg-emerald-100 px-1.5 py-0.5 rounded font-bold">
-                            APK/PWA
-                          </span>
+                          <span className="text-[10px] text-slate-400">10m auto</span>
                         </button>
 
                         <button
                           onClick={() => {
                             logout();
                             setShowRoleMenu(false);
-                            onOpenLogin();
+                            onOpenLogin?.();
                           }}
                           className="w-full flex items-center gap-1.5 text-xs text-rose-600 hover:bg-rose-50 px-2 py-1.5 rounded-md font-medium"
                         >
@@ -468,14 +494,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
               )}
             </div>
-          ) : (
-            <button
-              onClick={onOpenLogin}
-              className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white shadow-xs transition-colors"
-            >
-              Sign In
-            </button>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -490,12 +509,6 @@ export const Navbar: React.FC<NavbarProps> = ({
           }}
         />
       )}
-
-      {/* Android Package & Install Modal */}
-      <AndroidInstallModal
-        isOpen={showInstallModal}
-        onClose={() => setShowInstallModal(false)}
-      />
     </header>
   );
 };

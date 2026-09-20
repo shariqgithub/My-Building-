@@ -5,7 +5,6 @@ import { computeMonthlyBills, generateWhatsAppBillMessage } from '../utils/billi
 import { BillInvoiceModal } from './BillInvoiceModal';
 import { EditFlatModal } from './EditFlatModal';
 import { EditBuildingModal } from './EditBuildingModal';
-import { AndroidPackagePanel } from './AndroidPackagePanel';
 import { BuildingExpensesTracker } from './BuildingExpensesTracker';
 import {
   Zap,
@@ -48,8 +47,9 @@ import {
   Cloud,
   Database,
   PiggyBank,
+  RotateCcw,
+  AlertTriangle,
 } from 'lucide-react';
-import { usePWAInstall } from '../hooks/usePWAInstall';
 
 export const AdminDashboard: React.FC = () => {
   const {
@@ -74,9 +74,11 @@ export const AdminDashboard: React.FC = () => {
     cloudSyncStatus,
     saveToCloud,
     switchToResidentView,
+    exportBackupJson,
+    importBackupJson,
   } = useBuilding();
 
-  const [activeTab, setActiveTab] = useState<'readings' | 'payments' | 'expenses' | 'settings' | 'flats' | 'app_pkg'>('readings');
+  const [activeTab, setActiveTab] = useState<'readings' | 'payments' | 'expenses' | 'settings' | 'flats'>('readings');
 
   // Reading Entry States
   const [selectedMonth, setSelectedMonth] = useState(activeCycle?.month || 'September 2026');
@@ -628,17 +630,6 @@ export const AdminDashboard: React.FC = () => {
         >
           <Users className="w-3.5 h-3.5 text-slate-600" />
           15 Flats Directory
-        </button>
-        <button
-          onClick={() => setActiveTab('app_pkg')}
-          className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 whitespace-nowrap transition-all ${
-            activeTab === 'app_pkg'
-              ? 'bg-white text-slate-900 shadow-xs'
-              : 'text-slate-600 hover:text-slate-900'
-          }`}
-        >
-          <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
-          Android App & APK
         </button>
       </div>
 
@@ -2104,6 +2095,34 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* Secure Admin-Only Danger Zone for Database Baseline */}
+          <div className="bg-rose-50/50 rounded-2xl border border-rose-200/80 p-5 shadow-xs">
+            <h3 className="text-sm font-bold text-rose-900 mb-1 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-600" />
+              Administrative Danger Zone
+            </h3>
+            <p className="text-xs text-rose-700/80 mb-3">
+              This action is strictly restricted to authenticated Society Admins. Only perform this if you wish to wipe all current billing records and reset the database back to default initial values.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                const confirmed = window.confirm(
+                  'DANGER: Are you sure you want to reset all data? This will restore the 15 baseline flats and initial ₹16,000 billing cycle. All custom flats and manual entries will be reset.'
+                );
+                if (confirmed) {
+                  resetAllData();
+                  setSaveSuccessMsg('System reset to baseline sample data successfully.');
+                  setTimeout(() => setSaveSuccessMsg(''), 4000);
+                }
+              }}
+              className="text-xs font-bold text-rose-700 hover:text-rose-800 bg-white hover:bg-rose-100 border border-rose-300 px-3.5 py-2 rounded-xl flex items-center gap-2 transition-colors cursor-pointer shadow-2xs"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
+              Reset Database to Initial Baseline
+            </button>
+          </div>
         </div>
       )}
 
@@ -2137,7 +2156,7 @@ export const AdminDashboard: React.FC = () => {
                   if (ok) {
                     setSaveSuccessMsg('All 15 flats, names, and phone numbers are safely backed up to Cloud Database!');
                   } else {
-                    setSaveSuccessMsg('Saved to local storage.');
+                    setSaveSuccessMsg('Saved to local device storage.');
                   }
                   setTimeout(() => setSaveSuccessMsg(''), 4000);
                 }}
@@ -2145,8 +2164,60 @@ export const AdminDashboard: React.FC = () => {
                 title="Backup all resident names and numbers to Cloud Firestore"
               >
                 <Cloud className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Save to Cloud Database</span>
+                <span>Save to Cloud</span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const json = exportBackupJson();
+                  const blob = new Blob([json], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  const dateStr = new Date().toISOString().split('T')[0];
+                  a.href = url;
+                  a.download = `building-tracker-backup-${dateStr}.json`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                  setSaveSuccessMsg('Backup file downloaded! You can import this on any phone or device.');
+                  setTimeout(() => setSaveSuccessMsg(''), 4000);
+                }}
+                className="text-[11px] font-bold text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-300 px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                title="Download all resident details, flats, and bills to a JSON file"
+              >
+                <Download className="w-3.5 h-3.5 text-blue-600" />
+                <span>Export Backup (JSON)</span>
+              </button>
+
+              <label
+                className="text-[11px] font-bold text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                title="Restore resident names, flats, or billing data from a backup file"
+              >
+                <Upload className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Import Backup</span>
+                <input
+                  type="file"
+                  accept=".json,application/json"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                      const content = event.target?.result as string;
+                      if (content) {
+                        const result = importBackupJson(content);
+                        setSaveSuccessMsg(result.message);
+                        setTimeout(() => setSaveSuccessMsg(''), 5000);
+                      }
+                    };
+                    reader.readAsText(file);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
 
               <button
                 type="button"
@@ -2257,9 +2328,6 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* TAB 5: ANDROID APP & APK PACKAGING */}
-      {activeTab === 'app_pkg' && <AndroidPackagePanel />}
 
       {/* Admin Payment Record Modal with Paid Amount, Remaining Balance & Advance Calculation */}
       {markingFlatId && (() => {

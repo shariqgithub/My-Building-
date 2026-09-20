@@ -5,18 +5,11 @@ import { LoginModal } from './components/LoginModal';
 import { ProductionLogin } from './components/ProductionLogin';
 import { ResidentDashboard } from './components/ResidentDashboard';
 import { AdminDashboard } from './components/AdminDashboard';
+import { LockScreen } from './components/LockScreen';
 import { OfflineIndicator } from './components/OfflineIndicator';
-import {
-  ShieldCheck,
-  Smartphone,
-  Zap,
-  Info,
-  RotateCcw,
-  Sparkles,
-} from 'lucide-react';
 
 const AppContent: React.FC = () => {
-  const { currentSession, resetAllData } = useBuilding();
+  const { currentSession, isAppLocked } = useBuilding();
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isMobileFrame, setIsMobileFrame] = useState(false);
 
@@ -54,6 +47,8 @@ const AppContent: React.FC = () => {
         >
           {!currentSession ? (
             <ProductionLogin />
+          ) : isAppLocked ? (
+            <LockScreen />
           ) : currentSession.role === 'admin' ? (
             <AdminDashboard />
           ) : (
@@ -69,21 +64,6 @@ const AppContent: React.FC = () => {
               <span>
                 <strong>Smart Society Sub-Meter Engine</strong> &bull; Bank-grade UPI QR &bull; Firebase SMS Auth &bull; 15-Flat Isolation
               </span>
-            </div>
-
-            <div className="flex items-center gap-4 text-xs">
-              <button
-                onClick={() => {
-                  if (confirm('Reset to initial sample data with 15 flats and ₹16,000 bill?')) {
-                    resetAllData();
-                  }
-                }}
-                className="hover:text-slate-800 flex items-center gap-1.5 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
-                title="Reset database to sample baseline"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                Reset Sample Data
-              </button>
             </div>
           </div>
         </footer>
