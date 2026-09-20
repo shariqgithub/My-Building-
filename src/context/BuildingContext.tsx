@@ -9,6 +9,7 @@ import {
   AppNotification,
   UserSession,
   BuildingExpense,
+  SocietyBroadcast,
 } from '../types';
 import {
   INITIAL_SETTINGS,
@@ -16,6 +17,7 @@ import {
   INITIAL_CYCLES,
   INITIAL_NOTIFICATIONS,
   INITIAL_EXPENSES,
+  INITIAL_BROADCASTS,
 } from '../data/initialData';
 
 interface BuildingContextType {
@@ -26,6 +28,7 @@ interface BuildingContextType {
   activeCycleId: string;
   notifications: AppNotification[];
   expenses: BuildingExpense[];
+  broadcasts: SocietyBroadcast[];
   monthlyManualCollections: Record<string, number>;
   currentSession: UserSession | null;
   unreadCount: number;
@@ -37,7 +40,8 @@ interface BuildingContextType {
     customCycles?: BillingCycle[],
     customActiveCycleId?: string,
     customExpenses?: BuildingExpense[],
-    customManualCollections?: Record<string, number>
+    customManualCollections?: Record<string, number>,
+    customBroadcasts?: SocietyBroadcast[]
   ) => Promise<boolean>;
   saveAllFlats: (flatsToSave: FlatInfo[]) => Promise<boolean>;
   setActiveCycleId: (id: string) => void;
@@ -65,6 +69,9 @@ interface BuildingContextType {
   addExpense: (expense: Omit<BuildingExpense, 'id' | 'createdAt'>) => void;
   updateExpense: (id: string, updates: Partial<BuildingExpense>) => void;
   deleteExpense: (id: string) => void;
+  addBroadcast: (broadcast: Omit<SocietyBroadcast, 'id' | 'createdAt'>) => void;
+  updateBroadcast: (id: string, updates: Partial<SocietyBroadcast>) => void;
+  deleteBroadcast: (id: string) => void;
   setMonthlyManualCollection: (monthKey: string, amount: number | undefined) => void;
   markPaymentStatus: (
     cycleId: string,
@@ -212,6 +219,7 @@ const STORAGE_KEYS = {
   NOTIFICATIONS: 'bijli_notifications_v1',
   SESSION: 'bijli_session_v1',
   EXPENSES: 'bijli_expenses_v1',
+  BROADCASTS: 'bijli_broadcasts_v1',
   MANUAL_COLLECTIONS: 'bijli_manual_collections_v1',
   SESSION_UNLOCKED: 'bijli_session_unlocked_v1',
   LAST_ACTIVE: 'bijli_last_active_time_v1',
@@ -309,6 +317,15 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return saved ? JSON.parse(saved) : INITIAL_EXPENSES;
     } catch {
       return INITIAL_EXPENSES;
+    }
+  });
+
+  const [broadcasts, setBroadcasts] = useState<SocietyBroadcast[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEYS.BROADCASTS);
+      return saved ? JSON.parse(saved) : INITIAL_BROADCASTS;
+    } catch {
+      return INITIAL_BROADCASTS;
     }
   });
 
@@ -428,6 +445,9 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             if (Array.isArray(data.expenses)) {
               setExpenses(data.expenses);
             }
+            if (Array.isArray(data.broadcasts)) {
+              setBroadcasts(data.broadcasts);
+            }
             if (data.manualCollections && typeof data.manualCollections === 'object') {
               setMonthlyManualCollections(data.manualCollections);
             }
@@ -442,6 +462,8 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               const initialSettingsToSave = settings;
               const localExpensesStr = localStorage.getItem(STORAGE_KEYS.EXPENSES);
               const initialExpensesToSave = localExpensesStr ? JSON.parse(localExpensesStr) : expenses;
+              const localBroadcastsStr = localStorage.getItem(STORAGE_KEYS.BROADCASTS);
+              const initialBroadcastsToSave = localBroadcastsStr ? JSON.parse(localBroadcastsStr) : broadcasts;
               setDoc(
                 docRef,
                 JSON.parse(
@@ -451,6 +473,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                     cycles,
                     activeCycleId,
                     expenses: initialExpensesToSave,
+                    broadcasts: initialBroadcastsToSave,
                     manualCollections: monthlyManualCollections,
                     updatedAt: new Date().toISOString(),
                   })
@@ -492,7 +515,8 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     customCycles?: BillingCycle[],
     customActiveCycleId?: string,
     customExpenses?: BuildingExpense[],
-    customManualCollections?: Record<string, number>
+    customManualCollections?: Record<string, number>,
+    customBroadcasts?: SocietyBroadcast[]
   ): Promise<boolean> => {
     try {
       isLocalSavingRef.current = true;
@@ -506,6 +530,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           cycles: customCycles || cycles,
           activeCycleId: customActiveCycleId || activeCycleId,
           expenses: customExpenses || expenses,
+          broadcasts: customBroadcasts || broadcasts,
           manualCollections: customManualCollections || monthlyManualCollections,
           updatedAt: new Date().toISOString(),
         })
@@ -579,6 +604,14 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       console.error(e);
     }
   }, [expenses]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.BROADCASTS, JSON.stringify(broadcasts));
+    } catch (e) {
+      console.error(e);
+    }
+  }, [broadcasts]);
 
   useEffect(() => {
     try {
@@ -1675,6 +1708,38 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     addNotification('Expense Deleted', 'Expense entry removed successfully.', 'system');
   };
 
+  const addBroadcast = (newBroadcastData: Omit<SocietyBroadcast, 'id' | 'createdAt'>) => {
+    const newBroadcast: SocietyBroadcast = {
+      ...newBroadcastData,
+      id: `broadcast-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      createdAt: new Date().toISOString(),
+    };
+    const updated = [newBroadcast, ...broadcasts];
+    setBroadcasts(updated);
+    saveToCloud(undefined, undefined, undefined, undefined, undefined, undefined, updated);
+    const catLabel = newBroadcastData.category === 'notice' ? 'Notice' : newBroadcastData.category === 'appeal' ? 'Appeal' : 'Announcement';
+    addNotification(
+      `New ${catLabel}: ${newBroadcastData.title}`,
+      newBroadcastData.content.slice(0, 100) + (newBroadcastData.content.length > 100 ? '...' : ''),
+      'system'
+    );
+  };
+
+  const updateBroadcast = (id: string, updates: Partial<SocietyBroadcast>) => {
+    const updated = broadcasts.map((b) =>
+      b.id === id ? { ...b, ...updates, updatedAt: new Date().toISOString() } : b
+    );
+    setBroadcasts(updated);
+    saveToCloud(undefined, undefined, undefined, undefined, undefined, undefined, updated);
+  };
+
+  const deleteBroadcast = (id: string) => {
+    const updated = broadcasts.filter((b) => b.id !== id);
+    setBroadcasts(updated);
+    saveToCloud(undefined, undefined, undefined, undefined, undefined, undefined, updated);
+    addNotification('Broadcast Removed', 'Notice/Appeal/Announcement entry removed.', 'system');
+  };
+
   const setMonthlyManualCollection = (monthKey: string, amount: number | undefined) => {
     setMonthlyManualCollections((prev) => {
       const updated = { ...prev };
@@ -1721,6 +1786,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       cycles,
       activeCycleId,
       expenses,
+      broadcasts,
       monthlyManualCollections,
     };
     return JSON.stringify(backup, null, 2);
@@ -1752,6 +1818,10 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setExpenses(data.expenses);
         localStorage.setItem(STORAGE_KEYS.EXPENSES, JSON.stringify(data.expenses));
       }
+      if (Array.isArray(data.broadcasts)) {
+        setBroadcasts(data.broadcasts);
+        localStorage.setItem(STORAGE_KEYS.BROADCASTS, JSON.stringify(data.broadcasts));
+      }
       if (data.monthlyManualCollections && typeof data.monthlyManualCollections === 'object') {
         setMonthlyManualCollections(data.monthlyManualCollections);
         localStorage.setItem(STORAGE_KEYS.MANUAL_COLLECTIONS, JSON.stringify(data.monthlyManualCollections));
@@ -1763,7 +1833,8 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         data.cycles || cycles,
         data.activeCycleId || activeCycleId,
         data.expenses || expenses,
-        data.monthlyManualCollections || monthlyManualCollections
+        data.monthlyManualCollections || monthlyManualCollections,
+        data.broadcasts || broadcasts
       );
       return { success: true, message: 'Backup successfully imported! All flats and details updated.' };
     } catch (err) {
@@ -1802,6 +1873,10 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addExpense,
         updateExpense,
         deleteExpense,
+        broadcasts,
+        addBroadcast,
+        updateBroadcast,
+        deleteBroadcast,
         setMonthlyManualCollection,
         checkPhoneRegistration,
         setFlatPin,

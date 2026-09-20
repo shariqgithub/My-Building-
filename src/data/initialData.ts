@@ -1,4 +1,4 @@
-import { BuildingSettings, FlatInfo, BillingCycle, AppNotification, BuildingExpense } from '../types';
+import { BuildingSettings, FlatInfo, BillingCycle, AppNotification, BuildingExpense, SocietyBroadcast } from '../types';
 
 export const INITIAL_SETTINGS: BuildingSettings = {
   buildingName: 'Gulmohar Heights Co-Op Society',
@@ -787,5 +787,79 @@ export const INITIAL_EXPENSES: BuildingExpense[] = [
     paidTo: 'Safai Sewa Cleaners',
     paymentMethod: 'Cash',
     createdAt: '2026-08-12T15:00:00Z',
+  },
+];
+
+export const INITIAL_BROADCASTS: SocietyBroadcast[] = [
+  // NOTICES
+  {
+    id: 'broadcast-notice-1',
+    category: 'notice',
+    title: 'Water Tank & Overhead Sump Deep Cleaning Schedule',
+    content: 'All residents are notified that the society overhead and underground water tanks will be sanitized on Sunday, 27th September from 9:00 AM to 1:00 PM. Water supply will remain paused during these hours. Please store sufficient water for morning usage.',
+    date: '2026-09-20',
+    priority: 'important',
+    author: 'Society Secretary',
+    isActive: true,
+    createdAt: '2026-09-20T10:00:00Z',
+  },
+  {
+    id: 'broadcast-notice-2',
+    category: 'notice',
+    title: 'Timely Electricity & Maintenance Bill Payment Due Date',
+    content: 'The due date for September 2026 sub-meter electricity and maintenance dues is 25th September. Kindly clear your dues via direct UPI QR or bank transfer to ensure seamless accounting and avoid late reconciliation follow-ups.',
+    date: '2026-09-15',
+    priority: 'normal',
+    author: 'Managing Committee',
+    isActive: true,
+    createdAt: '2026-09-15T09:30:00Z',
+  },
+
+  // APPEALS
+  {
+    id: 'broadcast-appeal-1',
+    category: 'appeal',
+    title: 'Corridor Clearance & Stairwell Free Movement',
+    content: 'Residents are earnestly requested to keep the building common staircases and floor lobbies clear of personal footwear racks, bicycle stands, and discard boxes. Free stairways ensure emergency safety and unobstructed cleaning by the housekeeping team.',
+    date: '2026-09-18',
+    priority: 'normal',
+    author: 'Resident Welfare Committee',
+    isActive: true,
+    createdAt: '2026-09-18T14:15:00Z',
+  },
+  {
+    id: 'broadcast-appeal-2',
+    category: 'appeal',
+    title: 'Electricity & Water Conservation in Common Areas',
+    content: 'A humble appeal to all flat owners: please ensure common passage lights and motor pump switches are turned off when not in use. If any common tap or pipeline leakage is observed, kindly inform the secretary immediately to prevent water wastage.',
+    date: '2026-09-12',
+    priority: 'normal',
+    author: 'Managing Committee',
+    isActive: true,
+    createdAt: '2026-09-12T11:00:00Z',
+  },
+
+  // ANNOUNCEMENTS
+  {
+    id: 'broadcast-announcement-1',
+    category: 'announcement',
+    title: 'Annual General Body Meeting (AGM) & High-Tea Gathering',
+    content: 'The Annual General Body Meeting (AGM) for all flat owners is scheduled for Sunday, 4th October at 6:30 PM in the Ground Floor Community Hall. Agenda includes solar rooftop installation proposal, festive celebrations, and society accounts review. All residents are cordially invited.',
+    date: '2026-09-19',
+    priority: 'important',
+    author: 'Society Chairman & Secretary',
+    isActive: true,
+    createdAt: '2026-09-19T16:00:00Z',
+  },
+  {
+    id: 'broadcast-announcement-2',
+    category: 'announcement',
+    title: 'New High-Definition CCTV Cameras Installed at Gate & Parking',
+    content: 'We are pleased to announce that 4 new HD night-vision security cameras have been successfully commissioned covering the main building gate, 2-wheeler parking, and ground floor entrance lobby for 24/7 security.',
+    date: '2026-09-10',
+    priority: 'normal',
+    author: 'Security Sub-Committee',
+    isActive: true,
+    createdAt: '2026-09-10T12:00:00Z',
   },
 ];

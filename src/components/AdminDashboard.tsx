@@ -6,6 +6,7 @@ import { BillInvoiceModal } from './BillInvoiceModal';
 import { EditFlatModal } from './EditFlatModal';
 import { EditBuildingModal } from './EditBuildingModal';
 import { BuildingExpensesTracker } from './BuildingExpensesTracker';
+import { AdminBroadcastsManager } from './AdminBroadcastsManager';
 import {
   Zap,
   CheckCircle2,
@@ -49,6 +50,7 @@ import {
   PiggyBank,
   RotateCcw,
   AlertTriangle,
+  Megaphone,
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -78,7 +80,7 @@ export const AdminDashboard: React.FC = () => {
     importBackupJson,
   } = useBuilding();
 
-  const [activeTab, setActiveTab] = useState<'readings' | 'payments' | 'expenses' | 'settings' | 'flats'>('readings');
+  const [activeTab, setActiveTab] = useState<'readings' | 'payments' | 'expenses' | 'settings' | 'flats' | 'broadcasts'>('readings');
 
   // Reading Entry States
   const [selectedMonth, setSelectedMonth] = useState(activeCycle?.month || 'September 2026');
@@ -630,6 +632,17 @@ export const AdminDashboard: React.FC = () => {
         >
           <Users className="w-3.5 h-3.5 text-slate-600" />
           15 Flats Directory
+        </button>
+        <button
+          onClick={() => setActiveTab('broadcasts')}
+          className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 whitespace-nowrap transition-all ${
+            activeTab === 'broadcasts'
+              ? 'bg-white text-indigo-700 shadow-xs'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <Megaphone className="w-3.5 h-3.5 text-indigo-600" />
+          Notice, Appeal & Announcement
         </button>
       </div>
 
@@ -2327,6 +2340,11 @@ export const AdminDashboard: React.FC = () => {
             </table>
           </div>
         </div>
+      )}
+
+      {/* TAB 6: NOTICE, APPEAL & ANNOUNCEMENT */}
+      {activeTab === 'broadcasts' && (
+        <AdminBroadcastsManager />
       )}
 
       {/* Admin Payment Record Modal with Paid Amount, Remaining Balance & Advance Calculation */}

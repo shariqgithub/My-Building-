@@ -141,3 +141,18 @@ export interface MonthlyAccounting {
   netSavings: number; // positive = surplus/savings, negative = out-of-pocket deficit
   status: 'surplus' | 'deficit' | 'break_even';
 }
+
+export type SocietyBroadcastCategory = 'notice' | 'appeal' | 'announcement';
+
+export interface SocietyBroadcast {
+  id: string;
+  category: SocietyBroadcastCategory;
+  title: string;
+  content: string;
+  date: string; // e.g. "20 Sep 2026" or "2026-09-20"
+  priority?: 'normal' | 'important' | 'urgent';
+  author?: string; // e.g. "Society Secretary", "Managing Committee"
+  isActive: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
