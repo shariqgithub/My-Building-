@@ -571,310 +571,293 @@ export const ResidentDashboard: React.FC = () => {
             )}
           </div>
 
-          {/* THREE SECTIONS: NOTICE, APPEAL & ANNOUNCEMENT */}
-          <div className="space-y-3.5">
-            {/* Section Header & Tabs */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2">
-              <div>
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center border border-indigo-200">
-                    <Megaphone className="w-4 h-4" />
+          {/* SECTIONS: NOTICE, APPEAL & ANNOUNCEMENT (Only rendered when there is active content) */}
+          {activeBroadcasts.length > 0 && (() => {
+            const hasNotices = notices.length > 0;
+            const hasAppeals = appeals.length > 0;
+            const hasAnnouncements = announcements.length > 0;
+            const visibleCount = (hasNotices ? 1 : 0) + (hasAppeals ? 1 : 0) + (hasAnnouncements ? 1 : 0);
+
+            // Determine effective filter
+            const effectiveFilter =
+              broadcastFilter === 'all'
+                ? 'all'
+                : (broadcastFilter === 'notice' && hasNotices)
+                ? 'notice'
+                : (broadcastFilter === 'appeal' && hasAppeals)
+                ? 'appeal'
+                : (broadcastFilter === 'announcement' && hasAnnouncements)
+                ? 'announcement'
+                : 'all';
+
+            const gridClass =
+              effectiveFilter !== 'all' || visibleCount === 1
+                ? 'grid-cols-1'
+                : visibleCount === 2
+                ? 'grid-cols-1 md:grid-cols-2'
+                : 'grid-cols-1 lg:grid-cols-3';
+
+            return (
+              <div className="space-y-3 pt-2">
+                {/* Section Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center border border-indigo-200 shrink-0">
+                      <Megaphone className="w-4 h-4" />
+                    </div>
+                    <h3 className="text-sm font-bold text-slate-900 tracking-tight">
+                      Society Communications
+                    </h3>
                   </div>
-                  <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-                    Society Communications Board
-                  </h3>
+
+                  {/* Filter tabs only if more than 1 section has content */}
+                  {visibleCount > 1 && (
+                    <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold self-start sm:self-auto overflow-x-auto">
+                      <button
+                        type="button"
+                        onClick={() => setBroadcastFilter('all')}
+                        className={`py-1 px-2.5 rounded-lg transition-all cursor-pointer ${
+                          effectiveFilter === 'all'
+                            ? 'bg-white text-slate-900 shadow-xs'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        All
+                      </button>
+                      {hasNotices && (
+                        <button
+                          type="button"
+                          onClick={() => setBroadcastFilter('notice')}
+                          className={`py-1 px-2.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer ${
+                            effectiveFilter === 'notice'
+                              ? 'bg-white text-blue-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          <Bell className="w-3 h-3 text-blue-600" />
+                          Notice
+                        </button>
+                      )}
+                      {hasAppeals && (
+                        <button
+                          type="button"
+                          onClick={() => setBroadcastFilter('appeal')}
+                          className={`py-1 px-2.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer ${
+                            effectiveFilter === 'appeal'
+                              ? 'bg-white text-amber-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          <HeartHandshake className="w-3 h-3 text-amber-600" />
+                          Appeal
+                        </button>
+                      )}
+                      {hasAnnouncements && (
+                        <button
+                          type="button"
+                          onClick={() => setBroadcastFilter('announcement')}
+                          className={`py-1 px-2.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer ${
+                            effectiveFilter === 'announcement'
+                              ? 'bg-white text-emerald-700 shadow-xs'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          <Megaphone className="w-3 h-3 text-emerald-600" />
+                          Announcement
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Official notices, resident welfare appeals, and building announcements from the managing committee.
-                </p>
-              </div>
 
-              {/* View filter */}
-              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs font-semibold self-start sm:self-auto overflow-x-auto">
-                <button
-                  type="button"
-                  onClick={() => setBroadcastFilter('all')}
-                  className={`py-1 px-2.5 rounded-lg transition-all cursor-pointer ${
-                    broadcastFilter === 'all'
-                      ? 'bg-white text-slate-900 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  All ({activeBroadcasts.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setBroadcastFilter('notice')}
-                  className={`py-1 px-2.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer ${
-                    broadcastFilter === 'notice'
-                      ? 'bg-white text-blue-700 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <Bell className="w-3 h-3 text-blue-600" />
-                  Notice ({notices.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setBroadcastFilter('appeal')}
-                  className={`py-1 px-2.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer ${
-                    broadcastFilter === 'appeal'
-                      ? 'bg-white text-amber-700 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <HeartHandshake className="w-3 h-3 text-amber-600" />
-                  Appeal ({appeals.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setBroadcastFilter('announcement')}
-                  className={`py-1 px-2.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer ${
-                    broadcastFilter === 'announcement'
-                      ? 'bg-white text-emerald-700 shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <Megaphone className="w-3 h-3 text-emerald-600" />
-                  Announcement ({announcements.length})
-                </button>
-              </div>
-            </div>
-
-            {/* Three Distinct Sections: Notice, Appeal & Announcement */}
-            <div className={`grid gap-4 ${broadcastFilter === 'all' ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1'}`}>
-              {/* SECTION 1: NOTICE */}
-              {(broadcastFilter === 'all' || broadcastFilter === 'notice') && (
-                <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs flex flex-col">
-                  <div className="p-3.5 bg-blue-50/70 border-b border-blue-100 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center shadow-2xs">
-                        <Bell className="w-3.5 h-3.5" />
-                      </div>
-                      <div>
+                {/* Visible Content Cards - Only renders sections with active items */}
+                <div className={`grid gap-4 ${gridClass}`}>
+                  {/* NOTICE SECTION - Only shown if it has items */}
+                  {hasNotices && (effectiveFilter === 'all' || effectiveFilter === 'notice') && (
+                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs flex flex-col">
+                      <div className="p-3 bg-blue-50/80 border-b border-blue-100 flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                          <Bell className="w-3.5 h-3.5" />
+                        </div>
                         <h4 className="text-xs font-bold text-blue-950 uppercase tracking-wider">
                           Notice
                         </h4>
-                        <p className="text-[10px] text-blue-700/80">Rules & Maintenance Directives</p>
                       </div>
-                    </div>
-                    <span className="text-[11px] font-bold font-mono px-2 py-0.5 rounded-full bg-blue-200/80 text-blue-900">
-                      {notices.length} Active
-                    </span>
-                  </div>
 
-                  <div className="p-3.5 flex-1 space-y-3">
-                    {notices.length === 0 ? (
-                      <div className="text-center py-6 px-2 text-slate-400">
-                        <Bell className="w-6 h-6 mx-auto mb-1.5 opacity-40 text-blue-400" />
-                        <p className="text-xs font-medium text-slate-500">No active notices</p>
-                        <p className="text-[10px] text-slate-400 mt-0.5">Official rules and directives will appear here.</p>
-                      </div>
-                    ) : (
-                      notices.map((item) => (
-                        <div
-                          key={item.id}
-                          className={`p-3 rounded-xl border transition-all ${
-                            item.priority === 'urgent'
-                              ? 'bg-rose-50/60 border-rose-200 ring-1 ring-rose-300'
-                              : item.priority === 'important'
-                              ? 'bg-amber-50/40 border-amber-200'
-                              : 'bg-slate-50/70 border-slate-200 hover:border-blue-200'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-1.5 mb-1.5">
-                            <span className="text-[10px] font-semibold text-slate-500 flex items-center gap-1">
-                              <Calendar className="w-3 h-3 text-slate-400" />
-                              {item.date}
-                            </span>
-                            {item.priority === 'urgent' && (
-                              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 animate-pulse">
-                                Urgent
+                      <div className="p-3.5 flex-1 space-y-3">
+                        {notices.map((item) => (
+                          <div
+                            key={item.id}
+                            className={`p-3 rounded-xl border transition-all ${
+                              item.priority === 'urgent'
+                                ? 'bg-rose-50/60 border-rose-200 ring-1 ring-rose-300'
+                                : item.priority === 'important'
+                                ? 'bg-amber-50/40 border-amber-200'
+                                : 'bg-slate-50/70 border-slate-200 hover:border-blue-200'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                              <span className="text-[10px] font-semibold text-slate-500 flex items-center gap-1">
+                                <Calendar className="w-3 h-3 text-slate-400" />
+                                {item.date}
                               </span>
-                            )}
-                            {item.priority === 'important' && (
-                              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
-                                Important
-                              </span>
+                              {item.priority === 'urgent' && (
+                                <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 animate-pulse">
+                                  Urgent
+                                </span>
+                              )}
+                              {item.priority === 'important' && (
+                                <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                                  Important
+                                </span>
+                              )}
+                            </div>
+
+                            <h5 className="text-xs font-bold text-slate-900 mb-1 leading-snug">
+                              {item.title}
+                            </h5>
+
+                            <p className="text-[11px] text-slate-600 leading-relaxed whitespace-pre-wrap">
+                              {item.content}
+                            </p>
+
+                            {item.author && (
+                              <div className="mt-2 pt-1.5 border-t border-slate-200/60 flex items-center gap-1 text-[10px] text-slate-500">
+                                <User className="w-3 h-3 text-slate-400" />
+                                <span>Issued By: <strong>{item.author}</strong></span>
+                              </div>
                             )}
                           </div>
-
-                          <h5 className="text-xs font-bold text-slate-900 mb-1 leading-snug">
-                            {item.title}
-                          </h5>
-
-                          <p className="text-[11px] text-slate-600 leading-relaxed whitespace-pre-wrap">
-                            {item.content}
-                          </p>
-
-                          {item.author && (
-                            <div className="mt-2 pt-1.5 border-t border-slate-200/60 flex items-center gap-1 text-[10px] text-slate-500">
-                              <User className="w-3 h-3 text-slate-400" />
-                              <span>Issued By: <strong>{item.author}</strong></span>
-                            </div>
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* SECTION 2: APPEAL */}
-              {(broadcastFilter === 'all' || broadcastFilter === 'appeal') && (
-                <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs flex flex-col">
-                  <div className="p-3.5 bg-amber-50/70 border-b border-amber-100 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-amber-600 text-white flex items-center justify-center shadow-2xs">
-                        <HeartHandshake className="w-3.5 h-3.5" />
+                        ))}
                       </div>
-                      <div>
+                    </div>
+                  )}
+
+                  {/* APPEAL SECTION - Only shown if it has items */}
+                  {hasAppeals && (effectiveFilter === 'all' || effectiveFilter === 'appeal') && (
+                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs flex flex-col">
+                      <div className="p-3 bg-amber-50/80 border-b border-amber-100 flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-amber-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                          <HeartHandshake className="w-3.5 h-3.5" />
+                        </div>
                         <h4 className="text-xs font-bold text-amber-950 uppercase tracking-wider">
                           Appeal
                         </h4>
-                        <p className="text-[10px] text-amber-700/80">Cooperation & Welfare Requests</p>
                       </div>
-                    </div>
-                    <span className="text-[11px] font-bold font-mono px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-900">
-                      {appeals.length} Active
-                    </span>
-                  </div>
 
-                  <div className="p-3.5 flex-1 space-y-3">
-                    {appeals.length === 0 ? (
-                      <div className="text-center py-6 px-2 text-slate-400">
-                        <HeartHandshake className="w-6 h-6 mx-auto mb-1.5 opacity-40 text-amber-400" />
-                        <p className="text-xs font-medium text-slate-500">No active appeals</p>
-                        <p className="text-[10px] text-slate-400 mt-0.5">Community welfare and cleanliness appeals will appear here.</p>
-                      </div>
-                    ) : (
-                      appeals.map((item) => (
-                        <div
-                          key={item.id}
-                          className={`p-3 rounded-xl border transition-all ${
-                            item.priority === 'urgent'
-                              ? 'bg-rose-50/60 border-rose-200 ring-1 ring-rose-300'
-                              : item.priority === 'important'
-                              ? 'bg-amber-50/40 border-amber-200'
-                              : 'bg-slate-50/70 border-slate-200 hover:border-amber-200'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-1.5 mb-1.5">
-                            <span className="text-[10px] font-semibold text-slate-500 flex items-center gap-1">
-                              <Calendar className="w-3 h-3 text-slate-400" />
-                              {item.date}
-                            </span>
-                            {item.priority === 'urgent' && (
-                              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 animate-pulse">
-                                Urgent
+                      <div className="p-3.5 flex-1 space-y-3">
+                        {appeals.map((item) => (
+                          <div
+                            key={item.id}
+                            className={`p-3 rounded-xl border transition-all ${
+                              item.priority === 'urgent'
+                                ? 'bg-rose-50/60 border-rose-200 ring-1 ring-rose-300'
+                                : item.priority === 'important'
+                                ? 'bg-amber-50/40 border-amber-200'
+                                : 'bg-slate-50/70 border-slate-200 hover:border-amber-200'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                              <span className="text-[10px] font-semibold text-slate-500 flex items-center gap-1">
+                                <Calendar className="w-3 h-3 text-slate-400" />
+                                {item.date}
                               </span>
-                            )}
-                            {item.priority === 'important' && (
-                              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
-                                Important
-                              </span>
+                              {item.priority === 'urgent' && (
+                                <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 animate-pulse">
+                                  Urgent
+                                </span>
+                              )}
+                              {item.priority === 'important' && (
+                                <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                                  Important
+                                </span>
+                              )}
+                            </div>
+
+                            <h5 className="text-xs font-bold text-slate-900 mb-1 leading-snug">
+                              {item.title}
+                            </h5>
+
+                            <p className="text-[11px] text-slate-600 leading-relaxed whitespace-pre-wrap">
+                              {item.content}
+                            </p>
+
+                            {item.author && (
+                              <div className="mt-2 pt-1.5 border-t border-slate-200/60 flex items-center gap-1 text-[10px] text-slate-500">
+                                <User className="w-3 h-3 text-slate-400" />
+                                <span>By: <strong>{item.author}</strong></span>
+                              </div>
                             )}
                           </div>
-
-                          <h5 className="text-xs font-bold text-slate-900 mb-1 leading-snug">
-                            {item.title}
-                          </h5>
-
-                          <p className="text-[11px] text-slate-600 leading-relaxed whitespace-pre-wrap">
-                            {item.content}
-                          </p>
-
-                          {item.author && (
-                            <div className="mt-2 pt-1.5 border-t border-slate-200/60 flex items-center gap-1 text-[10px] text-slate-500">
-                              <User className="w-3 h-3 text-slate-400" />
-                              <span>By: <strong>{item.author}</strong></span>
-                            </div>
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* SECTION 3: ANNOUNCEMENT */}
-              {(broadcastFilter === 'all' || broadcastFilter === 'announcement') && (
-                <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs flex flex-col">
-                  <div className="p-3.5 bg-emerald-50/70 border-b border-emerald-100 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center shadow-2xs">
-                        <Megaphone className="w-3.5 h-3.5" />
+                        ))}
                       </div>
-                      <div>
+                    </div>
+                  )}
+
+                  {/* ANNOUNCEMENT SECTION - Only shown if it has items */}
+                  {hasAnnouncements && (effectiveFilter === 'all' || effectiveFilter === 'announcement') && (
+                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs flex flex-col">
+                      <div className="p-3 bg-emerald-50/80 border-b border-emerald-100 flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                          <Megaphone className="w-3.5 h-3.5" />
+                        </div>
                         <h4 className="text-xs font-bold text-emerald-950 uppercase tracking-wider">
                           Announcement
                         </h4>
-                        <p className="text-[10px] text-emerald-700/80">Events, AGM Meetings & News</p>
                       </div>
-                    </div>
-                    <span className="text-[11px] font-bold font-mono px-2 py-0.5 rounded-full bg-emerald-200/80 text-emerald-900">
-                      {announcements.length} Active
-                    </span>
-                  </div>
 
-                  <div className="p-3.5 flex-1 space-y-3">
-                    {announcements.length === 0 ? (
-                      <div className="text-center py-6 px-2 text-slate-400">
-                        <Megaphone className="w-6 h-6 mx-auto mb-1.5 opacity-40 text-emerald-400" />
-                        <p className="text-xs font-medium text-slate-500">No active announcements</p>
-                        <p className="text-[10px] text-slate-400 mt-0.5">Society gatherings and AGM announcements will appear here.</p>
-                      </div>
-                    ) : (
-                      announcements.map((item) => (
-                        <div
-                          key={item.id}
-                          className={`p-3 rounded-xl border transition-all ${
-                            item.priority === 'urgent'
-                              ? 'bg-rose-50/60 border-rose-200 ring-1 ring-rose-300'
-                              : item.priority === 'important'
-                              ? 'bg-amber-50/40 border-amber-200'
-                              : 'bg-slate-50/70 border-slate-200 hover:border-emerald-200'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-1.5 mb-1.5">
-                            <span className="text-[10px] font-semibold text-slate-500 flex items-center gap-1">
-                              <Calendar className="w-3 h-3 text-slate-400" />
-                              {item.date}
-                            </span>
-                            {item.priority === 'urgent' && (
-                              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 animate-pulse">
-                                Urgent
+                      <div className="p-3.5 flex-1 space-y-3">
+                        {announcements.map((item) => (
+                          <div
+                            key={item.id}
+                            className={`p-3 rounded-xl border transition-all ${
+                              item.priority === 'urgent'
+                                ? 'bg-rose-50/60 border-rose-200 ring-1 ring-rose-300'
+                                : item.priority === 'important'
+                                ? 'bg-amber-50/40 border-amber-200'
+                                : 'bg-slate-50/70 border-slate-200 hover:border-emerald-200'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                              <span className="text-[10px] font-semibold text-slate-500 flex items-center gap-1">
+                                <Calendar className="w-3 h-3 text-slate-400" />
+                                {item.date}
                               </span>
-                            )}
-                            {item.priority === 'important' && (
-                              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
-                                Important
-                              </span>
+                              {item.priority === 'urgent' && (
+                                <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 border border-rose-200 animate-pulse">
+                                  Urgent
+                                </span>
+                              )}
+                              {item.priority === 'important' && (
+                                <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                                  Important
+                                </span>
+                              )}
+                            </div>
+
+                            <h5 className="text-xs font-bold text-slate-900 mb-1 leading-snug">
+                              {item.title}
+                            </h5>
+
+                            <p className="text-[11px] text-slate-600 leading-relaxed whitespace-pre-wrap">
+                              {item.content}
+                            </p>
+
+                            {item.author && (
+                              <div className="mt-2 pt-1.5 border-t border-slate-200/60 flex items-center gap-1 text-[10px] text-slate-500">
+                                <User className="w-3 h-3 text-slate-400" />
+                                <span>By: <strong>{item.author}</strong></span>
+                              </div>
                             )}
                           </div>
-
-                          <h5 className="text-xs font-bold text-slate-900 mb-1 leading-snug">
-                            {item.title}
-                          </h5>
-
-                          <p className="text-[11px] text-slate-600 leading-relaxed whitespace-pre-wrap">
-                            {item.content}
-                          </p>
-
-                          {item.author && (
-                            <div className="mt-2 pt-1.5 border-t border-slate-200/60 flex items-center gap-1 text-[10px] text-slate-500">
-                              <User className="w-3 h-3 text-slate-400" />
-                              <span>By: <strong>{item.author}</strong></span>
-                            </div>
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
