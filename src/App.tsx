@@ -62,7 +62,7 @@ const AppContent: React.FC = () => {
             <div className="flex items-center gap-2 text-xs text-slate-600 font-medium">
               <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
               <span>
-                <strong>Smart Society Sub-Meter Engine</strong> &bull; Bank-grade UPI QR &bull; Firebase SMS Auth &bull; 15-Flat Isolation
+                <strong>Smart Society Sub-Meter Engine</strong> &bull; Bank-grade UPI QR &bull; Developed by Mohammad Shariq Ansari (Senior Software Engineer)
               </span>
             </div>
           </div>

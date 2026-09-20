@@ -64,10 +64,12 @@ export const ResidentDashboard: React.FC = () => {
   // Current Month Key for active cycle
   const currentMonthKey = activeCycle?.monthKey || '2026-09';
 
-  // Current Month Building Expenses (added by admin)
+  // Current Month Building Expenses (added by admin, excluding main government electricity bill)
   const currentMonthExpenses = useMemo(() => {
     return expenses
       .filter((exp) => {
+        // Exclude main government electricity bill - only display extra expenses
+        if (exp.category === 'electricity_bill') return false;
         if (exp.monthKey) return exp.monthKey === currentMonthKey;
         if (exp.cycleId && activeCycle) return exp.cycleId === activeCycle.id;
         return false;
@@ -445,48 +447,6 @@ export const ResidentDashboard: React.FC = () => {
                 )}
               </div>
             )}
-          </div>
-
-          {/* Building Common Meter Transparency Card */}
-          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Info className="w-4 h-4 text-amber-500" />
-              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                Building Main Meter Calculation Breakdown
-              </h3>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed mb-3">
-              Our building has 1 main meter for the entire building and sub-meters in each flat. Here is how this month's bill was computed:
-            </p>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-              <div className="bg-white p-2.5 rounded-xl border border-slate-200">
-                <span className="text-[10px] text-slate-400 block font-medium">Main Meter Bill</span>
-                <span className="font-bold text-slate-900 text-sm">
-                  ₹{activeCycle.mainMeter.mainMeterBillAmount.toLocaleString('en-IN')}
-                </span>
-              </div>
-              <div className="bg-white p-2.5 rounded-xl border border-slate-200">
-                <span className="text-[10px] text-slate-400 block font-medium">Main Meter Units</span>
-                <span className="font-bold text-slate-900 text-sm">
-                  {activeCycle.mainMeter.mainMeterUnits} Units
-                </span>
-              </div>
-              <div className="bg-white p-2.5 rounded-xl border border-slate-200">
-                <span className="text-[10px] text-slate-400 block font-medium">All 15 Flats Units</span>
-                <span className="font-bold text-amber-600 text-sm">
-                  {activeCycle.totalSubMeterUnits} Units
-                </span>
-              </div>
-              <div className="bg-white p-2.5 rounded-xl border border-slate-200">
-                <span className="text-[10px] text-slate-400 block font-medium">Calculation Rule</span>
-                <span className="font-semibold text-slate-700 text-xs">
-                  {activeCycle.calculationMode === 'proportional_main_bill'
-                    ? 'Proportional Bill Split'
-                    : 'Fixed Unit Rate'}
-                </span>
-              </div>
-            </div>
           </div>
 
           {/* CURRENT MONTH EXPENSES SECTION (Replaces previous bill history on the main page) */}
