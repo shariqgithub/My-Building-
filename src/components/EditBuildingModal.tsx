@@ -250,7 +250,7 @@ export const EditBuildingModal: React.FC<EditBuildingModalProps> = ({
                     type="password"
                     value={adminPin}
                     onChange={(e) => setAdminPin(e.target.value)}
-                    placeholder="1234"
+                    placeholder="••••"
                     maxLength={6}
                     className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 text-xs font-mono focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
                   />

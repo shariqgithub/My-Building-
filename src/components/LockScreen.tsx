@@ -302,7 +302,7 @@ export const LockScreen: React.FC = () => {
                 maxLength={6}
                 value={newPin}
                 onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
-                placeholder="e.g. 1234"
+                placeholder="••••"
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-center font-mono text-lg tracking-widest focus:ring-2 focus:ring-amber-500 focus:outline-none"
                 autoFocus
               />
@@ -545,12 +545,8 @@ export const LockScreen: React.FC = () => {
               {isAdmin ? (
                 <>
                   <p>
-                    As the <strong>Society Administrator</strong>, your default backup PIN is{' '}
-                    <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono font-bold text-indigo-700">
-                      {settings.adminPin || '1234'}
-                    </code>.
+                    As the <strong>Society Administrator</strong>, you can unlock using your secret Administrator Master Password:
                   </p>
-                  <p>You can also unlock using your Administrator Master Password:</p>
                   <button
                     onClick={() => {
                       setShowForgotHelp(false);

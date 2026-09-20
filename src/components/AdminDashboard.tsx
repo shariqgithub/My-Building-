@@ -2034,10 +2034,10 @@ export const AdminDashboard: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <input
                     type="password"
-                    value={settings.adminPin || '1234'}
+                    value={settings.adminPin || ''}
                     onChange={(e) => updateSettings({ adminPin: e.target.value.trim() })}
                     maxLength={6}
-                    placeholder="1234"
+                    placeholder="••••"
                     className="w-32 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-slate-900 tracking-widest text-sm focus:bg-white focus:ring-2 focus:ring-indigo-500/20"
                   />
                   <span className="text-xs text-slate-500">Active secret PIN</span>

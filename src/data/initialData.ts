@@ -15,7 +15,7 @@ export const INITIAL_SETTINGS: BuildingSettings = {
   societyPayeeName: 'Gulmohar Heights Apartment',
   adminPin: '1234',
   adminPhone: '9876543210',
-  adminEmail: 'secretary@society.com',
+  adminEmail: 'shariqalig881@gmail.com',
   adminPassword: 'My1Build2@3',
   adminFlatId: 'flat-101',
 };
