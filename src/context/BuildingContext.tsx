@@ -1466,7 +1466,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (emailInput && targetEmail !== registeredAdminEmail && targetEmail !== 'shariqalig881@gmail.com') {
       return {
         success: false,
-        error: `Entered email (${targetEmail}) does not match the registered Secretary Admin email address.`,
+        error: 'Entered email does not match the registered Secretary Admin email address.',
       };
     }
 

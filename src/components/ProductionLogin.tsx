@@ -80,7 +80,7 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
   const [isAdminLoading, setIsAdminLoading] = useState(false);
 
   // Admin Real Email OTP state
-  const [adminEmailInput, setAdminEmailInput] = useState('shariqalig881@gmail.com');
+  const [adminEmailInput, setAdminEmailInput] = useState('');
   const [adminEmailOtp, setAdminEmailOtp] = useState('');
   const [adminEmailStep, setAdminEmailStep] = useState<'request' | 'verify'>('request');
 
@@ -273,7 +273,10 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
       }
 
       setAdminEmailStep('verify');
-      setAdminSuccessNotice(res.message || `A 6-digit OTP code was sent to ${cleanEmail}. Check your inbox or spam folder.`);
+      const maskedEmail = cleanEmail.includes('@')
+        ? `${cleanEmail.split('@')[0].slice(0, 2)}•••@${cleanEmail.split('@')[1]}`
+        : 'your inbox';
+      setAdminSuccessNotice(`A 6-digit OTP code was sent to ${maskedEmail}. Check your inbox or spam folder.`);
     } catch (err: any) {
       setAdminError(err?.message || 'Failed to request email OTP.');
     } finally {
@@ -777,7 +780,7 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
                         type="email"
                         value={adminEmailInput}
                         onChange={(e) => setAdminEmailInput(e.target.value)}
-                        placeholder="shariqalig881@gmail.com"
+                        placeholder="Enter registered secretary email"
                         required
                         className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium font-mono"
                       />
@@ -810,8 +813,12 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
                   <form onSubmit={handleVerifyAdminEmailOtp} className="space-y-3.5">
                     <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs">
                       <div>
-                        <span className="text-[10px] text-slate-400 block font-semibold">Sent to</span>
-                        <span className="font-mono text-slate-800 font-semibold">{adminEmailInput}</span>
+                        <span className="text-[10px] text-slate-400 block font-semibold">Passcode sent to</span>
+                        <span className="font-mono text-slate-800 font-semibold">
+                          {adminEmailInput.includes('@')
+                            ? `${adminEmailInput.split('@')[0].slice(0, 2)}•••@${adminEmailInput.split('@')[1]}`
+                            : '••••••••'}
+                        </span>
                       </div>
                       <button
                         type="button"
@@ -893,7 +900,7 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
                     autoComplete="username"
                     value={adminIdentifier}
                     onChange={(e) => setAdminIdentifier(e.target.value)}
-                    placeholder="e.g. shariqalig881@gmail.com or mobile"
+                    placeholder="Enter admin email or phone number"
                     required
                     className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
                   />
