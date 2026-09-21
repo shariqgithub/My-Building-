@@ -64,9 +64,51 @@ export const ResidentDashboard: React.FC = () => {
   const [pinChangeError, setPinChangeError] = useState('');
   const [pinChangeSuccess, setPinChangeSuccess] = useState('');
 
-  // Find flat details
-  const flat = flats.find((f) => f.id === currentSession?.flatId) || flats[0];
-  const activeReading = activeCycle?.readings.find((r) => r.flatId === flat.id);
+  // Find flat details: resilient matching by id, or by flatNumber
+  const flat = useMemo(() => {
+    if (currentSession?.flatId) {
+      const foundById = flats.find((f) => f.id === currentSession.flatId);
+      if (foundById) return foundById;
+    }
+    if (currentSession?.flatNumber) {
+      const cleanNum = currentSession.flatNumber.trim().toLowerCase();
+      const foundByNum = flats.find((f) => f.flatNumber.trim().toLowerCase() === cleanNum);
+      if (foundByNum) return foundByNum;
+    }
+    return flats[0];
+  }, [flats, currentSession?.flatId, currentSession?.flatNumber]);
+
+  // Resilient activeReading calculation so no unit ever shows blank
+  const activeReading = useMemo(() => {
+    if (!activeCycle || !flat) return undefined;
+    const found = activeCycle.readings.find((r) => r.flatId === flat.id || r.flatNumber === flat.flatNumber);
+    if (found) return found;
+
+    // Resilient fallback reading if cycle is missing an entry
+    const prev = flat.baselineReading || 0;
+    const rate = flat.customRatePerUnit || activeCycle.effectiveRatePerUnit || settings.defaultRatePerUnit || 9;
+    const commonChg = activeCycle.readings[0]?.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160;
+    const maintChg = activeCycle.readings[0]?.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110;
+    const total = commonChg + maintChg;
+    return {
+      flatId: flat.id,
+      flatNumber: flat.flatNumber,
+      previousReading: prev,
+      currentReading: prev,
+      unitsConsumed: 0,
+      ratePerUnit: rate,
+      calculatedAmount: 0,
+      commonShareAmount: commonChg,
+      commonMeterCharges: commonChg,
+      commonMeterLabel: activeCycle.readings[0]?.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light',
+      maintenanceCharges: maintChg,
+      maintenanceLabel: activeCycle.readings[0]?.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning',
+      totalBillAmount: total,
+      netPayableAmount: total,
+      remainingBalance: total,
+      paymentStatus: 'unpaid' as const,
+    };
+  }, [activeCycle, flat, settings]);
 
   // Current Month Key for active cycle
   const currentMonthKey = activeCycle?.monthKey || '2026-09';
@@ -142,8 +184,14 @@ export const ResidentDashboard: React.FC = () => {
 
   if (!activeReading || !activeCycle) {
     return (
-      <div className="p-8 text-center text-slate-500">
-        No active electricity bill found for this flat.
+      <div className="p-8 text-center bg-white border border-slate-200 rounded-2xl max-w-md mx-auto my-8 space-y-3">
+        <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center mx-auto">
+          <Activity className="w-6 h-6" />
+        </div>
+        <h3 className="text-base font-bold text-slate-800">Billing Records Loading</h3>
+        <p className="text-xs text-slate-500">
+          Preparing electricity bill records for {flat?.flatNumber ? `Flat ${flat.flatNumber}` : 'your unit'}...
+        </p>
       </div>
     );
   }

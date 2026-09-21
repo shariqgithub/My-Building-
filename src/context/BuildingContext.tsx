@@ -298,6 +298,179 @@ export const isPhoneMatch = (flatPhone: string | undefined, queryPhone: string):
   return false;
 };
 
+// Normalize flat identifier for deduplication (e.g., '402', 'Flat 402' -> 'flat-402', 'Shops -02' -> 'shop-2')
+export const normalizeFlatNumber = (num: string): string => {
+  if (!num) return '';
+  const clean = num.trim().toLowerCase();
+  if (clean.includes('shop')) {
+    const digits = clean.replace(/\D/g, '');
+    return `shop-${digits ? parseInt(digits, 10) : clean}`;
+  }
+  const digits = clean.replace(/\D/g, '');
+  if (digits) {
+    return `flat-${parseInt(digits, 10)}`;
+  }
+  return clean;
+};
+
+export interface DeduplicateResult {
+  cleanedFlats: FlatInfo[];
+  cleanedCycles: BillingCycle[];
+  reassignedMap: Record<string, string>;
+}
+
+export const deduplicateFlatsAndCycles = (
+  rawFlats: FlatInfo[],
+  rawCycles: BillingCycle[]
+): DeduplicateResult => {
+  const reassignedMap: Record<string, string> = {};
+
+  // Group flats by normalized key
+  const groups = new Map<string, FlatInfo[]>();
+  for (const f of rawFlats) {
+    const key = normalizeFlatNumber(f.flatNumber);
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key)!.push(f);
+  }
+
+  const cleanedFlats: FlatInfo[] = [];
+
+  groups.forEach((groupFlats, key) => {
+    if (groupFlats.length === 1) {
+      cleanedFlats.push(groupFlats[0]);
+      return;
+    }
+
+    // Multiple flats share the same normalized number (e.g. duplicate 402)
+    // Find which flat has the most actual data in rawCycles
+    let bestFlat = groupFlats[0];
+    let bestScore = -1;
+
+    for (const f of groupFlats) {
+      let score = 0;
+      if (f.id === `flat-${key.replace('flat-', '')}` || f.id === key) score += 5;
+      if (f.pin && f.pin.trim().length >= 4) score += 3;
+      if (f.phone && f.phone.includes('8077649394')) score += 3;
+      if (f.ownerName && !f.ownerName.toLowerCase().includes('owner') && !f.ownerName.toLowerCase().includes('resident')) score += 3;
+
+      for (const c of rawCycles) {
+        const r = c.readings.find((entry) => entry.flatId === f.id || entry.flatNumber === f.flatNumber);
+        if (r && r.flatId === f.id) {
+          score += 1;
+          if ((r.unitsConsumed || 0) > 0) score += 15;
+          if ((r.currentReading || 0) > (r.previousReading || 0)) score += 15;
+          if ((r.paidAmount || 0) > 0) score += 20;
+          if (r.paymentStatus === 'paid' || r.paymentStatus === 'partially_paid') score += 20;
+        }
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestFlat = f;
+      }
+    }
+
+    // Merge best fields from other duplicate flats
+    let mergedFlat: FlatInfo = { ...bestFlat };
+    for (const other of groupFlats) {
+      if (other.id !== bestFlat.id) {
+        reassignedMap[other.id] = bestFlat.id;
+        if (!mergedFlat.pin && other.pin) mergedFlat.pin = other.pin;
+        if (!mergedFlat.customRatePerUnit && other.customRatePerUnit) {
+          mergedFlat.customRatePerUnit = other.customRatePerUnit;
+        }
+        if ((!mergedFlat.phone || mergedFlat.phone.length < 10) && other.phone) {
+          mergedFlat.phone = other.phone;
+        }
+        if (
+          (!mergedFlat.ownerName || mergedFlat.ownerName.toLowerCase().includes('resident') || mergedFlat.ownerName.toLowerCase().includes('owner')) &&
+          other.ownerName
+        ) {
+          mergedFlat.ownerName = other.ownerName;
+        }
+      }
+    }
+
+    cleanedFlats.push(mergedFlat);
+  });
+
+  // Now clean cycles:
+  // 1. In every cycle, if reading has flatId in reassignedMap, migrate to canonical flatId
+  // 2. If cycle has multiple readings for canonical flatId, pick the best one
+  // 3. Ensure every flat in cleanedFlats has a reading entry
+  const cleanedCycles = rawCycles.map((c) => {
+    const readingMap = new Map<string, FlatReadingEntry>();
+
+    for (const r of c.readings) {
+      const canonicalId = reassignedMap[r.flatId] || r.flatId;
+      const targetFlat = cleanedFlats.find((f) => f.id === canonicalId);
+      const flatNum = targetFlat ? targetFlat.flatNumber : r.flatNumber;
+
+      const updatedReading: FlatReadingEntry = {
+        ...r,
+        flatId: canonicalId,
+        flatNumber: flatNum,
+      };
+
+      if (!readingMap.has(canonicalId)) {
+        readingMap.set(canonicalId, updatedReading);
+      } else {
+        const existing = readingMap.get(canonicalId)!;
+        const existingScore =
+          (existing.unitsConsumed || 0) * 2 +
+          ((existing.paidAmount || 0) > 0 ? 100 : 0) +
+          (existing.paymentStatus === 'paid' ? 50 : 0);
+        const newScore =
+          (updatedReading.unitsConsumed || 0) * 2 +
+          ((updatedReading.paidAmount || 0) > 0 ? 100 : 0) +
+          (updatedReading.paymentStatus === 'paid' ? 50 : 0);
+
+        if (newScore > existingScore) {
+          readingMap.set(canonicalId, updatedReading);
+        }
+      }
+    }
+
+    // Ensure all flats in cleanedFlats have a reading entry in this cycle
+    for (const f of cleanedFlats) {
+      if (!readingMap.has(f.id)) {
+        const prev = f.baselineReading || 0;
+        const rate = f.customRatePerUnit || c.effectiveRatePerUnit || 9;
+        const commonChg = c.readings[0]?.commonMeterCharges ?? 160;
+        const maintChg = c.readings[0]?.maintenanceCharges ?? 110;
+        const total = commonChg + maintChg;
+        readingMap.set(f.id, {
+          flatId: f.id,
+          flatNumber: f.flatNumber,
+          previousReading: prev,
+          currentReading: prev,
+          unitsConsumed: 0,
+          ratePerUnit: rate,
+          calculatedAmount: 0,
+          commonShareAmount: commonChg,
+          commonMeterCharges: commonChg,
+          commonMeterLabel: 'Water & stairs light',
+          maintenanceCharges: maintChg,
+          maintenanceLabel: 'Cleaning',
+          totalBillAmount: total,
+          netPayableAmount: total,
+          remainingBalance: total,
+          paymentStatus: 'unpaid',
+        });
+      }
+    }
+
+    return {
+      ...c,
+      readings: Array.from(readingMap.values()),
+    };
+  });
+
+  return { cleanedFlats, cleanedCycles, reassignedMap };
+};
+
 const BuildingContext = createContext<BuildingContextType | undefined>(undefined);
 
 export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -348,13 +521,14 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       // Ensure Flat 101, Flat 402, Shops -02, and Flat 01 exist
       for (const reqF of INITIAL_FLATS) {
         if (['flat-101', 'flat-402', 'shop-02', 'flat-01'].includes(reqF.id)) {
-          if (!list.some((f) => f.id === reqF.id)) {
+          if (!list.some((f) => normalizeFlatNumber(f.flatNumber) === normalizeFlatNumber(reqF.flatNumber))) {
             list.push(reqF);
           }
         }
       }
 
-      return list;
+      const { cleanedFlats } = deduplicateFlatsAndCycles(list, INITIAL_CYCLES);
+      return cleanedFlats;
     } catch {
       return INITIAL_FLATS;
     }
@@ -599,8 +773,10 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             if (data.settings) {
               setSettings((prev) => ({ ...prev, ...data.settings }));
             }
-            if (Array.isArray(data.flats) && data.flats.length > 0) {
-              let cloudFlats = [...data.flats];
+            let cloudFlats: FlatInfo[] = Array.isArray(data.flats) && data.flats.length > 0 ? [...data.flats] : [];
+            let cloudCycles: BillingCycle[] = Array.isArray(data.cycles) && data.cycles.length > 0 ? [...data.cycles] : [];
+
+            if (cloudFlats.length > 0) {
               cloudFlats = cloudFlats.map((f: FlatInfo) => {
                 if (f.id === 'flat-101' && (!f.phone || f.phone === '9820111101')) {
                   return { ...f, phone: '8077649394', ownerName: 'Mohammad Shariq Ansari' };
@@ -609,15 +785,15 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               });
               for (const reqF of INITIAL_FLATS) {
                 if (['flat-101', 'flat-402', 'shop-02', 'flat-01'].includes(reqF.id)) {
-                  if (!cloudFlats.some((f: FlatInfo) => f.id === reqF.id)) {
+                  if (!cloudFlats.some((f: FlatInfo) => normalizeFlatNumber(f.flatNumber) === normalizeFlatNumber(reqF.flatNumber))) {
                     cloudFlats.push(reqF);
                   }
                 }
               }
-              setFlats(cloudFlats);
             }
-            if (Array.isArray(data.cycles) && data.cycles.length > 0) {
-              const filteredCycles = data.cycles.filter((c: BillingCycle) => {
+
+            if (cloudCycles.length > 0) {
+              cloudCycles = cloudCycles.filter((c: BillingCycle) => {
                 const m = (c.month || '').toLowerCase();
                 const key = c.monthKey || '';
                 const cid = c.id || '';
@@ -625,7 +801,33 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 const isOct = key === '2026-10' || m.includes('october') || cid.includes('2026-10');
                 return !isSep && !isOct;
               });
-              setCycles(syncCycleBalances(filteredCycles.length > 0 ? filteredCycles : INITIAL_CYCLES));
+            }
+
+            if (cloudFlats.length > 0 && cloudCycles.length > 0) {
+              const { cleanedFlats, cleanedCycles, reassignedMap } = deduplicateFlatsAndCycles(cloudFlats, cloudCycles);
+              setFlats(cleanedFlats);
+              setCycles(syncCycleBalances(cleanedCycles));
+
+              if (Object.keys(reassignedMap).length > 0) {
+                saveToCloud(undefined, cleanedFlats, cleanedCycles);
+                if (currentSession && reassignedMap[currentSession.flatId]) {
+                  const targetId = reassignedMap[currentSession.flatId];
+                  const matchedFlat = cleanedFlats.find((f) => f.id === targetId);
+                  if (matchedFlat) {
+                    setAndUnlockSession({
+                      ...currentSession,
+                      flatId: matchedFlat.id,
+                      flatNumber: matchedFlat.flatNumber,
+                      name: matchedFlat.ownerName,
+                    });
+                  }
+                }
+              }
+            } else if (cloudFlats.length > 0) {
+              const { cleanedFlats } = deduplicateFlatsAndCycles(cloudFlats, INITIAL_CYCLES);
+              setFlats(cleanedFlats);
+            } else if (cloudCycles.length > 0) {
+              setCycles(syncCycleBalances(cloudCycles));
             }
             if (data.activeCycleId) {
               const aid = data.activeCycleId;
@@ -778,6 +980,33 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       console.error(e);
     }
   }, [cycles]);
+
+  // One-time startup self-healing reconciliation to eliminate duplicate flats (e.g. duplicate Flat 402)
+  useEffect(() => {
+    const { cleanedFlats, cleanedCycles, reassignedMap } = deduplicateFlatsAndCycles(flats, cycles);
+    const hasChanges = Object.keys(reassignedMap).length > 0 || cleanedFlats.length !== flats.length;
+    if (hasChanges) {
+      setFlats(cleanedFlats);
+      setCycles(syncCycleBalances(cleanedCycles));
+      try {
+        localStorage.setItem(STORAGE_KEYS.FLATS, JSON.stringify(cleanedFlats));
+        localStorage.setItem(STORAGE_KEYS.CYCLES, JSON.stringify(cleanedCycles));
+      } catch {}
+      saveToCloud(undefined, cleanedFlats, cleanedCycles);
+      if (currentSession && reassignedMap[currentSession.flatId]) {
+        const canonicalId = reassignedMap[currentSession.flatId];
+        const match = cleanedFlats.find((f) => f.id === canonicalId);
+        if (match) {
+          setAndUnlockSession({
+            ...currentSession,
+            flatId: match.id,
+            flatNumber: match.flatNumber,
+            name: match.ownerName,
+          });
+        }
+      }
+    }
+  }, []);
 
   useEffect(() => {
     try {
@@ -1742,7 +1971,14 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       (adminTen && (tenDigit === adminTen || rawClean === adminCleanPhone))
     );
 
-    const matchingFlats = flats.filter((f) => isPhoneMatch(f.phone, tenDigit));
+    const rawMatches = flats.filter((f) => isPhoneMatch(f.phone, tenDigit));
+    const seenNumbers = new Set<string>();
+    const matchingFlats = rawMatches.filter((f) => {
+      const key = normalizeFlatNumber(f.flatNumber);
+      if (seenNumbers.has(key)) return false;
+      seenNumbers.add(key);
+      return true;
+    });
 
     if (!isSecretary && matchingFlats.length === 0) {
       return {
@@ -2198,11 +2434,21 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!currentSession?.phone) return [];
     const clean = currentSession.phone.replace(/\D/g, '');
     const ten = clean.length > 10 ? clean.slice(-10) : clean;
-    return flats.filter((f) => isPhoneMatch(f.phone, ten));
+    const rawMatches = flats.filter((f) => isPhoneMatch(f.phone, ten));
+    const seenNumbers = new Set<string>();
+    return rawMatches.filter((f) => {
+      const key = normalizeFlatNumber(f.flatNumber);
+      if (seenNumbers.has(key)) return false;
+      seenNumbers.add(key);
+      return true;
+    });
   }, [currentSession?.phone, flats]);
 
   const switchFlatView = (targetFlatId: string) => {
-    const targetFlat = flats.find((f) => f.id === targetFlatId);
+    let targetFlat = flats.find((f) => f.id === targetFlatId);
+    if (!targetFlat && targetFlatId) {
+      targetFlat = flats.find((f) => normalizeFlatNumber(f.flatNumber) === normalizeFlatNumber(targetFlatId));
+    }
     if (!targetFlat || !currentSession) return;
 
     const rawClean = (currentSession.phone || '').replace(/\D/g, '');
@@ -2229,6 +2475,21 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const addFlat = async (flatData: Omit<FlatInfo, 'id'>): Promise<FlatInfo> => {
+    const existingIndex = flats.findIndex(
+      (f) => normalizeFlatNumber(f.flatNumber) === normalizeFlatNumber(flatData.flatNumber)
+    );
+    if (existingIndex !== -1) {
+      const existing = flats[existingIndex];
+      const merged: FlatInfo = { ...existing, ...flatData, id: existing.id };
+      const updatedFlats = flats.map((f, i) => (i === existingIndex ? merged : f));
+      setFlats(updatedFlats);
+      try {
+        localStorage.setItem(STORAGE_KEYS.FLATS, JSON.stringify(updatedFlats));
+      } catch {}
+      await saveToCloud(undefined, updatedFlats);
+      return merged;
+    }
+
     const newId = `flat-${Date.now()}`;
     const newFlat: FlatInfo = {
       ...flatData,
@@ -2243,16 +2504,25 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // Ensure all cycles have a reading entry for this new flat
     const updatedCycles = cycles.map((c) => {
       if (c.readings.some((r) => r.flatId === newId)) return c;
+      const commonChg = c.commonMeterPerFlat ?? 160;
+      const maintChg = c.maintenanceCharges ?? 110;
+      const total = commonChg + maintChg;
       const newReading: FlatReadingEntry = {
         flatId: newId,
         flatNumber: flatData.flatNumber,
-        previousReading: 0,
-        currentReading: 0,
+        previousReading: flatData.baselineReading || 0,
+        currentReading: flatData.baselineReading || 0,
         unitsConsumed: 0,
-        ratePerUnit: c.effectiveRatePerUnit || 10,
+        ratePerUnit: flatData.customRatePerUnit || c.effectiveRatePerUnit || 9,
         calculatedAmount: 0,
-        commonShareAmount: 0,
-        totalBillAmount: 0,
+        commonShareAmount: commonChg,
+        commonMeterCharges: commonChg,
+        commonMeterLabel: 'Water & stairs light',
+        maintenanceCharges: maintChg,
+        maintenanceLabel: 'Cleaning',
+        totalBillAmount: total,
+        netPayableAmount: total,
+        remainingBalance: total,
         paymentStatus: 'unpaid',
       };
       return {
