@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useMemo } from 'react';
 import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import {
@@ -111,13 +111,28 @@ interface BuildingContextType {
     }
   ) => void;
   submitResidentPaymentProof: (cycleId: string, flatId: string, upiRef: string, paidAmount: number) => void;
-  checkPhoneRegistration: (phone: string) => { isRegistered: boolean; hasPin: boolean; flat?: FlatInfo; isSecretary?: boolean; error?: string };
+  checkPhoneRegistration: (phone: string) => {
+    isRegistered: boolean;
+    hasPin: boolean;
+    flat?: FlatInfo;
+    matchingFlats: FlatInfo[];
+    isSecretary?: boolean;
+    error?: string;
+  };
   setFlatPin: (flatId: string, pin: string) => Promise<boolean>;
   resetFlatPin: (flatId: string) => Promise<boolean>;
-  loginResidentWithPin: (phone: string, pin: string) => { success: boolean; error?: string; flat?: FlatInfo; role?: 'resident' | 'admin' };
+  loginResidentWithPin: (
+    phone: string,
+    pin: string,
+    specificFlatId?: string
+  ) => { success: boolean; error?: string; flat?: FlatInfo; role?: 'resident' | 'admin' };
   loginAsResident: (phone: string) => { success: boolean; flat?: FlatInfo; error?: string };
   loginDirectlyAsFlat: (flatId: string, phone?: string) => { success: boolean; flat?: FlatInfo };
   assignPhoneToFlat: (flatId: string, phone: string) => void;
+  userFlats: FlatInfo[];
+  switchFlatView: (flatId: string) => void;
+  addFlat: (flat: Omit<FlatInfo, 'id'>) => Promise<FlatInfo>;
+  deleteFlat: (flatId: string) => Promise<void>;
   loginAsAdmin: (pin: string) => { success: boolean; error?: string };
   loginAsAdminWithPassword: (identifier: string, password: string) => { success: boolean; error?: string };
   sendAdminEmailOtp: (emailInput?: string) => Promise<{ success: boolean; email?: string; error?: string; message?: string }>;
@@ -263,6 +278,26 @@ const AUTO_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
 export const FIXED_ADMIN_NAME = 'Mohammad Shariq Ansari';
 export const FIXED_ADMIN_PHONE = '8077649394';
 
+// Robust phone matching helper for multi-unit lookups
+export const isPhoneMatch = (flatPhone: string | undefined, queryPhone: string): boolean => {
+  if (!flatPhone || !queryPhone) return false;
+  const qClean = queryPhone.replace(/\D/g, '');
+  const qTen = qClean.length > 10 ? qClean.slice(-10) : qClean;
+  if (!qTen || qTen.length < 5) return false;
+
+  const parts = flatPhone.split(/[,/;\s]+/);
+  for (const part of parts) {
+    const pClean = part.replace(/\D/g, '');
+    const pTen = pClean.length > 10 ? pClean.slice(-10) : pClean;
+    if (pTen === qTen || (pTen && qTen && (pTen.endsWith(qTen) || qTen.endsWith(pTen)))) {
+      return true;
+    }
+  }
+  const fAllClean = flatPhone.replace(/\D/g, '');
+  if (fAllClean.includes(qTen) || qTen.includes(fAllClean)) return true;
+  return false;
+};
+
 const BuildingContext = createContext<BuildingContextType | undefined>(undefined);
 
 export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -297,16 +332,29 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [flats, setFlats] = useState<FlatInfo[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.FLATS);
-      if (saved) {
-        const parsed = JSON.parse(saved) as FlatInfo[];
-        return parsed.map((f) => {
-          if (f.id === 'flat-203' && (!f.phone || f.phone === '9820111203')) {
-            return { ...f, phone: '9876554327' };
+      let list: FlatInfo[] = saved ? JSON.parse(saved) : INITIAL_FLATS;
+      if (!Array.isArray(list) || list.length === 0) list = INITIAL_FLATS;
+
+      list = list.map((f) => {
+        if (f.id === 'flat-101' && (!f.phone || f.phone === '9820111101')) {
+          return { ...f, phone: '8077649394', ownerName: 'Mohammad Shariq Ansari' };
+        }
+        if (f.id === 'flat-203' && (!f.phone || f.phone === '9820111203')) {
+          return { ...f, phone: '9876554327' };
+        }
+        return f;
+      });
+
+      // Ensure Flat 101, Flat 402, Shops -02, and Flat 01 exist
+      for (const reqF of INITIAL_FLATS) {
+        if (['flat-101', 'flat-402', 'shop-02', 'flat-01'].includes(reqF.id)) {
+          if (!list.some((f) => f.id === reqF.id)) {
+            list.push(reqF);
           }
-          return f;
-        });
+        }
       }
-      return INITIAL_FLATS;
+
+      return list;
     } catch {
       return INITIAL_FLATS;
     }
@@ -552,7 +600,21 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               setSettings((prev) => ({ ...prev, ...data.settings }));
             }
             if (Array.isArray(data.flats) && data.flats.length > 0) {
-              setFlats(data.flats);
+              let cloudFlats = [...data.flats];
+              cloudFlats = cloudFlats.map((f: FlatInfo) => {
+                if (f.id === 'flat-101' && (!f.phone || f.phone === '9820111101')) {
+                  return { ...f, phone: '8077649394', ownerName: 'Mohammad Shariq Ansari' };
+                }
+                return f;
+              });
+              for (const reqF of INITIAL_FLATS) {
+                if (['flat-101', 'flat-402', 'shop-02', 'flat-01'].includes(reqF.id)) {
+                  if (!cloudFlats.some((f: FlatInfo) => f.id === reqF.id)) {
+                    cloudFlats.push(reqF);
+                  }
+                }
+              }
+              setFlats(cloudFlats);
             }
             if (Array.isArray(data.cycles) && data.cycles.length > 0) {
               const filteredCycles = data.cycles.filter((c: BillingCycle) => {
@@ -1667,6 +1729,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return {
         isRegistered: false,
         hasPin: false,
+        matchingFlats: [],
         error: 'Please enter a valid 10-digit mobile number.',
       };
     }
@@ -1679,35 +1742,26 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       (adminTen && (tenDigit === adminTen || rawClean === adminCleanPhone))
     );
 
-    if (isSecretary) {
-      return {
-        isRegistered: true,
-        hasPin: true,
-        isSecretary: true,
-      };
-    }
+    const matchingFlats = flats.filter((f) => isPhoneMatch(f.phone, tenDigit));
 
-    const matchedFlat = flats.find((f) => {
-      const fClean = (f.phone || '').replace(/\D/g, '');
-      const fTen = fClean.length > 10 ? fClean.slice(-10) : fClean;
-      return fTen === tenDigit || fClean === rawClean || (tenDigit.length >= 10 && fClean.endsWith(tenDigit));
-    });
-
-    if (!matchedFlat) {
+    if (!isSecretary && matchingFlats.length === 0) {
       return {
         isRegistered: false,
         hasPin: false,
-        error: `Mobile number +91 ${tenDigit} is not registered with any flat. Please contact the society secretary to register your number.`,
+        matchingFlats: [],
+        isSecretary: false,
+        error: `Mobile number +91 ${tenDigit} is not registered with any flat. Please contact Society Secretary Mohammad Shariq Ansari (+91 8077649394) to register your number.`,
       };
     }
 
-    const hasPin = Boolean(matchedFlat.pin && matchedFlat.pin.trim().length >= 4);
+    const hasPin = matchingFlats.some((f) => f.pin && f.pin.trim().length >= 4);
 
     return {
       isRegistered: true,
       hasPin,
-      flat: matchedFlat,
-      isSecretary: false,
+      flat: matchingFlats[0],
+      matchingFlats,
+      isSecretary,
     };
   };
 
@@ -1730,15 +1784,23 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return await saveToCloud(undefined, updatedFlats);
   };
 
-  const loginResidentWithPin = (phone: string, pin: string) => {
+  const loginResidentWithPin = (phone: string, pin: string, specificFlatId?: string) => {
     const rawClean = phone.replace(/\D/g, '');
     const tenDigit = rawClean.length > 10 ? rawClean.slice(-10) : rawClean;
     const trimmedPin = pin?.trim() || '';
 
-    // Check Secretary
     const adminCleanPhone = (settings.adminPhone || FIXED_ADMIN_PHONE).replace(/\D/g, '');
     const adminTen = adminCleanPhone.length > 10 ? adminCleanPhone.slice(-10) : adminCleanPhone;
-    if (tenDigit === FIXED_ADMIN_PHONE || rawClean === FIXED_ADMIN_PHONE || (adminTen && (tenDigit === adminTen || rawClean === adminCleanPhone))) {
+    const isSecretary = Boolean(
+      tenDigit === FIXED_ADMIN_PHONE ||
+      rawClean === FIXED_ADMIN_PHONE ||
+      (adminTen && (tenDigit === adminTen || rawClean === adminCleanPhone))
+    );
+
+    const matchingFlats = flats.filter((f) => isPhoneMatch(f.phone, tenDigit));
+
+    // If Secretary and no specific flat requested, check for admin login
+    if (isSecretary && !specificFlatId) {
       const configuredPin = settings.adminPin?.trim() || INITIAL_SETTINGS.adminPin?.trim() || '1234';
       const configuredPwd = settings.adminPassword || INITIAL_SETTINGS.adminPassword || 'My1Build2@3';
       if (trimmedPin === configuredPin || trimmedPin === configuredPwd) {
@@ -1753,50 +1815,63 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         };
         setAndUnlockSession(session);
         return { success: true, role: 'admin' as const };
-      } else {
-        return { success: false, error: 'Incorrect Admin PIN or password.' };
       }
     }
 
-    const matchedFlat = flats.find((f) => {
-      const fClean = (f.phone || '').replace(/\D/g, '');
-      const fTen = fClean.length > 10 ? fClean.slice(-10) : fClean;
-      return fTen === tenDigit || fClean === rawClean || (tenDigit.length >= 10 && fClean.endsWith(tenDigit));
-    });
+    let targetFlat = specificFlatId ? flats.find((f) => f.id === specificFlatId) : matchingFlats[0];
+    if (!targetFlat && matchingFlats.length > 0) {
+      targetFlat = matchingFlats[0];
+    }
 
-    if (!matchedFlat) {
+    if (!targetFlat) {
       return {
         success: false,
         error: `Mobile number +91 ${tenDigit} is not registered in this building.`,
       };
     }
 
-    if (!matchedFlat.pin) {
+    const configuredPin = settings.adminPin?.trim() || INITIAL_SETTINGS.adminPin?.trim() || '1234';
+    const configuredPwd = settings.adminPassword || INITIAL_SETTINGS.adminPassword || 'My1Build2@3';
+    const isAdminPasscode = isSecretary && (trimmedPin === configuredPin || trimmedPin === configuredPwd);
+
+    const hasAnyPin = Boolean(targetFlat.pin || matchingFlats.some((f) => f.pin));
+    if (!hasAnyPin && !isAdminPasscode) {
       return {
         success: false,
-        error: 'Security PIN has not been set yet for this flat. Please set your PIN first.',
-        flat: matchedFlat,
+        error: 'Security PIN has not been set yet for this unit. Please set your PIN first.',
+        flat: targetFlat,
       };
     }
 
-    if (matchedFlat.pin !== trimmedPin) {
+    const isPinCorrect =
+      isAdminPasscode ||
+      targetFlat.pin === trimmedPin ||
+      matchingFlats.some((f) => f.pin === trimmedPin);
+
+    if (!isPinCorrect) {
       return {
         success: false,
         error: 'Incorrect PIN. Please re-enter or contact society office to reset.',
-        flat: matchedFlat,
+        flat: targetFlat,
       };
+    }
+
+    // Sync PIN if needed
+    if (!targetFlat.pin && trimmedPin) {
+      setFlatPin(targetFlat.id, trimmedPin);
     }
 
     const session: UserSession = {
       role: 'resident',
-      flatId: matchedFlat.id,
-      flatNumber: matchedFlat.flatNumber,
-      phone: matchedFlat.phone,
-      name: matchedFlat.ownerName,
+      flatId: targetFlat.id,
+      flatNumber: targetFlat.flatNumber,
+      phone: tenDigit,
+      name: targetFlat.ownerName,
+      isCommitteeMember: isSecretary,
       isPhoneVerified: true,
     };
     setAndUnlockSession(session);
-    return { success: true, flat: matchedFlat, role: 'resident' as const };
+    return { success: true, flat: targetFlat, role: 'resident' as const };
   };
 
   const loginAsResident = (phone: string) => {
@@ -2119,6 +2194,100 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const userFlats = useMemo(() => {
+    if (!currentSession?.phone) return [];
+    const clean = currentSession.phone.replace(/\D/g, '');
+    const ten = clean.length > 10 ? clean.slice(-10) : clean;
+    return flats.filter((f) => isPhoneMatch(f.phone, ten));
+  }, [currentSession?.phone, flats]);
+
+  const switchFlatView = (targetFlatId: string) => {
+    const targetFlat = flats.find((f) => f.id === targetFlatId);
+    if (!targetFlat || !currentSession) return;
+
+    const rawClean = (currentSession.phone || '').replace(/\D/g, '');
+    const tenDigit = rawClean.length > 10 ? rawClean.slice(-10) : rawClean;
+    const adminCleanPhone = (settings.adminPhone || FIXED_ADMIN_PHONE).replace(/\D/g, '');
+    const adminTen = adminCleanPhone.length > 10 ? adminCleanPhone.slice(-10) : adminCleanPhone;
+    const isSec = Boolean(
+      currentSession.isCommitteeMember ||
+      tenDigit === FIXED_ADMIN_PHONE ||
+      rawClean === FIXED_ADMIN_PHONE ||
+      (adminTen && (tenDigit === adminTen || rawClean === adminCleanPhone))
+    );
+
+    const updatedSession: UserSession = {
+      ...currentSession,
+      role: 'resident',
+      flatId: targetFlat.id,
+      flatNumber: targetFlat.flatNumber,
+      name: targetFlat.ownerName,
+      isCommitteeMember: isSec,
+      isPhoneVerified: true,
+    };
+    setAndUnlockSession(updatedSession);
+  };
+
+  const addFlat = async (flatData: Omit<FlatInfo, 'id'>): Promise<FlatInfo> => {
+    const newId = `flat-${Date.now()}`;
+    const newFlat: FlatInfo = {
+      ...flatData,
+      id: newId,
+    };
+    const updatedFlats = [...flats, newFlat];
+    setFlats(updatedFlats);
+    try {
+      localStorage.setItem(STORAGE_KEYS.FLATS, JSON.stringify(updatedFlats));
+    } catch {}
+
+    // Ensure all cycles have a reading entry for this new flat
+    const updatedCycles = cycles.map((c) => {
+      if (c.readings.some((r) => r.flatId === newId)) return c;
+      const newReading: FlatReadingEntry = {
+        flatId: newId,
+        flatNumber: flatData.flatNumber,
+        previousReading: 0,
+        currentReading: 0,
+        unitsConsumed: 0,
+        ratePerUnit: c.effectiveRatePerUnit || 10,
+        calculatedAmount: 0,
+        commonShareAmount: 0,
+        totalBillAmount: 0,
+        paymentStatus: 'unpaid',
+      };
+      return {
+        ...c,
+        readings: [...c.readings, newReading],
+      };
+    });
+    setCycles(updatedCycles);
+    try {
+      localStorage.setItem(STORAGE_KEYS.CYCLES, JSON.stringify(updatedCycles));
+    } catch {}
+
+    await saveToCloud(undefined, updatedFlats, updatedCycles);
+    return newFlat;
+  };
+
+  const deleteFlat = async (flatId: string): Promise<void> => {
+    const updatedFlats = flats.filter((f) => f.id !== flatId);
+    setFlats(updatedFlats);
+    try {
+      localStorage.setItem(STORAGE_KEYS.FLATS, JSON.stringify(updatedFlats));
+    } catch {}
+
+    const updatedCycles = cycles.map((c) => ({
+      ...c,
+      readings: c.readings.filter((r) => r.flatId !== flatId),
+    }));
+    setCycles(updatedCycles);
+    try {
+      localStorage.setItem(STORAGE_KEYS.CYCLES, JSON.stringify(updatedCycles));
+    } catch {}
+
+    await saveToCloud(undefined, updatedFlats, updatedCycles);
+  };
+
   const addNotification = (
     title: string,
     message: string,
@@ -2362,6 +2531,10 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         loginAsResident,
         loginDirectlyAsFlat,
         assignPhoneToFlat,
+        userFlats,
+        switchFlatView,
+        addFlat,
+        deleteFlat,
         loginAsAdmin,
         loginAsAdminWithPassword,
         sendAdminEmailOtp,

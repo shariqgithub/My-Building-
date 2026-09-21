@@ -43,6 +43,8 @@ export const Navbar: React.FC<NavbarProps> = ({
     switchRoleQuickly,
     switchToResidentView,
     switchToAdminView,
+    userFlats,
+    switchFlatView,
     isCommitteeMember,
     isAppLocked,
     lockApp,
@@ -346,7 +348,18 @@ export const Navbar: React.FC<NavbarProps> = ({
                 ) : (
                   <>
                     <Home className="w-3.5 h-3.5 text-emerald-600" />
-                    <span className="text-emerald-700">Flat {currentSession.flatNumber}</span>
+                    <span className="text-emerald-700">
+                      {currentSession.flatNumber.toLowerCase().includes('shop')
+                        ? currentSession.flatNumber
+                        : currentSession.flatNumber.toLowerCase().startsWith('flat')
+                        ? currentSession.flatNumber
+                        : `Flat ${currentSession.flatNumber}`}
+                    </span>
+                    {userFlats.length > 1 && (
+                      <span className="text-[9px] bg-amber-200/80 text-amber-900 font-black px-1 rounded ml-0.5">
+                        +{userFlats.length - 1}
+                      </span>
+                    )}
                   </>
                 )}
                 <ChevronDown className="w-3 h-3 text-slate-400" />
@@ -376,13 +389,60 @@ export const Navbar: React.FC<NavbarProps> = ({
                         </div>
                         <div className="overflow-hidden">
                           <div className="text-xs font-bold text-slate-900 truncate">
-                            Flat {currentSession.flatNumber} • {currentSession.name}
+                            {currentSession.flatNumber.toLowerCase().startsWith('flat') || currentSession.flatNumber.toLowerCase().includes('shop') ? currentSession.flatNumber : `Flat ${currentSession.flatNumber}`} • {currentSession.name}
                           </div>
                           <div className="text-[11px] text-slate-500 font-mono">
                             {currentSession.phone}
                           </div>
                         </div>
                       </div>
+
+                      {/* Multi-Flat Unit Switcher for Resident */}
+                      {userFlats.length > 1 && (
+                        <div className="mb-2.5 p-2 bg-amber-50/80 border border-amber-200 rounded-lg">
+                          <div className="text-[11px] font-bold text-amber-900 mb-1.5 flex items-center justify-between">
+                            <span className="flex items-center gap-1">
+                              <Home className="w-3.5 h-3.5 text-amber-700" />
+                              Switch Registered Unit
+                            </span>
+                            <span className="text-[10px] bg-amber-200/70 text-amber-900 px-1.5 py-0.2 rounded font-bold">
+                              {userFlats.length} Units
+                            </span>
+                          </div>
+                          <div className="space-y-1">
+                            {userFlats.map((f) => {
+                              const isSelected = currentSession.flatId === f.id;
+                              const unitShop = f.flatNumber.toLowerCase().includes('shop');
+                              const unitLabel = f.flatNumber.toLowerCase().startsWith('flat') || unitShop ? f.flatNumber : `Flat ${f.flatNumber}`;
+                              return (
+                                <button
+                                  key={f.id}
+                                  type="button"
+                                  onClick={() => {
+                                    switchFlatView(f.id);
+                                    setShowRoleMenu(false);
+                                  }}
+                                  className={`w-full text-left px-2.5 py-1.5 rounded-md text-xs font-semibold flex items-center justify-between transition-colors cursor-pointer ${
+                                    isSelected
+                                      ? 'bg-amber-600 text-white shadow-xs font-bold'
+                                      : 'bg-white hover:bg-amber-100/70 text-slate-800 border border-amber-200/60'
+                                  }`}
+                                >
+                                  <span className="flex items-center gap-1.5">
+                                    <span>{unitShop ? '🏪' : '🏠'}</span>
+                                    <span>View as {unitLabel}</span>
+                                  </span>
+                                  {isSelected ? (
+                                    <span className="text-[10px] font-bold bg-white/20 px-1.5 py-0.5 rounded">Active</span>
+                                  ) : (
+                                    <ArrowRightLeft className="w-3 h-3 text-slate-400" />
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Committee Switcher Action for Resident view */}
                       {currentSession.isCommitteeMember && (
@@ -440,7 +500,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                           className="w-full flex items-center gap-1.5 text-xs text-rose-600 hover:bg-rose-50 px-2 py-1.5 rounded-md font-medium transition-colors"
                         >
                           <LogOut className="w-3.5 h-3.5" />
-                          Sign Out (Flat {currentSession.flatNumber})
+                          Sign Out ({currentSession.flatNumber.toLowerCase().startsWith('flat') || currentSession.flatNumber.toLowerCase().includes('shop') ? currentSession.flatNumber : `Flat ${currentSession.flatNumber}`})
                         </button>
                       </div>
                     </div>
@@ -465,17 +525,43 @@ export const Navbar: React.FC<NavbarProps> = ({
                         <p className="text-[10px] text-emerald-800 mb-1.5">
                           View your own flat's bill and statement as a resident:
                         </p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            switchToResidentView();
-                            setShowRoleMenu(false);
-                          }}
-                          className="w-full py-1.5 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-                        >
-                          <ArrowRightLeft className="w-3.5 h-3.5" />
-                          Switch to Flat View
-                        </button>
+                        {userFlats.length > 1 ? (
+                          <div className="space-y-1">
+                            {userFlats.map((f) => {
+                              const unitShop = f.flatNumber.toLowerCase().includes('shop');
+                              const unitLabel = f.flatNumber.toLowerCase().startsWith('flat') || unitShop ? f.flatNumber : `Flat ${f.flatNumber}`;
+                              return (
+                                <button
+                                  key={f.id}
+                                  type="button"
+                                  onClick={() => {
+                                    switchFlatView(f.id);
+                                    setShowRoleMenu(false);
+                                  }}
+                                  className="w-full py-1.5 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-bold flex items-center justify-between transition-colors cursor-pointer shadow-xs"
+                                >
+                                  <span className="flex items-center gap-1.5">
+                                    <span>{unitShop ? '🏪' : '🏠'}</span>
+                                    <span>View as {unitLabel}</span>
+                                  </span>
+                                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              switchToResidentView();
+                              setShowRoleMenu(false);
+                            }}
+                            className="w-full py-1.5 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                          >
+                            <ArrowRightLeft className="w-3.5 h-3.5" />
+                            Switch to Flat View
+                          </button>
+                        )}
                       </div>
 
                       <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-1 pt-1 pb-1">

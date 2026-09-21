@@ -45,13 +45,16 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
   } = useBuilding();
 
   // Navigation steps:
-  // 'phone'     -> Resident enters registered 10-digit mobile number
-  // 'set_pin'   -> First-time login: Resident sets and confirms 4-digit PIN
-  // 'enter_pin' -> Returning resident: Enters their existing 4-digit PIN
-  const [step, setStep] = useState<'phone' | 'set_pin' | 'enter_pin'>('phone');
+  // 'phone'       -> Resident enters registered 10-digit mobile number
+  // 'select_unit' -> Multi-flat resident chooses which unit to view
+  // 'set_pin'     -> First-time login: Resident sets and confirms 4-digit PIN
+  // 'enter_pin'   -> Returning resident: Enters their existing 4-digit PIN
+  const [step, setStep] = useState<'phone' | 'select_unit' | 'set_pin' | 'enter_pin'>('phone');
 
   const [phoneNumber, setPhoneNumber] = useState('');
   const [activeFlat, setActiveFlat] = useState<FlatInfo | null>(null);
+  const [matchingFlats, setMatchingFlats] = useState<FlatInfo[]>([]);
+  const [isSecretaryUser, setIsSecretaryUser] = useState(false);
 
   // Set PIN inputs (First-time user)
   const [newPin, setNewPin] = useState('');
@@ -86,6 +89,30 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
 
   const getCleanDigits = (input: string) => input.replace(/\D/g, '');
 
+  const selectFlatAndProceed = (selectedFlat: FlatInfo) => {
+    setActiveFlat(selectedFlat);
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    const hasPin = Boolean(selectedFlat.pin && selectedFlat.pin.trim().length >= 4);
+    const anyMatchingHasPin = matchingFlats.some((f) => f.pin && f.pin.trim().length >= 4);
+
+    if (hasPin || anyMatchingHasPin) {
+      setStep('enter_pin');
+      setEnteredPin('');
+    } else {
+      setStep('set_pin');
+      setNewPin('');
+      setConfirmPin('');
+      const unitName = selectedFlat.flatNumber.toLowerCase().includes('shop')
+        ? selectedFlat.flatNumber
+        : `Flat ${selectedFlat.flatNumber}`;
+      setSuccessMessage(
+        `Welcome ${selectedFlat.ownerName}! Please set your 4-digit security PIN for ${unitName}.`
+      );
+    }
+  };
+
   // STEP 1: Verify phone number is registered
   const handleVerifyPhone = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -117,8 +144,18 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
         return;
       }
 
-      // If phone belongs to Secretary Admin
-      if (checkResult.isSecretary) {
+      setMatchingFlats(checkResult.matchingFlats);
+      setIsSecretaryUser(Boolean(checkResult.isSecretary));
+
+      // If registered with multiple flats OR (isSecretary AND has at least 1 flat)
+      if (checkResult.matchingFlats.length > 1 || (checkResult.isSecretary && checkResult.matchingFlats.length > 0)) {
+        setStep('select_unit');
+        setIsLoading(false);
+        return;
+      }
+
+      // If Secretary with 0 flats
+      if (checkResult.isSecretary && checkResult.matchingFlats.length === 0) {
         setShowAdminLogin(true);
         setAdminIdentifier(tenDigit);
         setAdminError('');
@@ -126,7 +163,7 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
         return;
       }
 
-      // If registered as a resident flat
+      // Single flat resident
       if (checkResult.flat) {
         setActiveFlat(checkResult.flat);
 
@@ -139,8 +176,11 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
           setStep('set_pin');
           setNewPin('');
           setConfirmPin('');
+          const unitName = checkResult.flat.flatNumber.toLowerCase().includes('shop')
+            ? checkResult.flat.flatNumber
+            : `Flat ${checkResult.flat.flatNumber}`;
           setSuccessMessage(
-            `Welcome ${checkResult.flat.ownerName}! Please set your 4-digit security PIN for Flat ${checkResult.flat.flatNumber}.`
+            `Welcome ${checkResult.flat.ownerName}! Please set your 4-digit security PIN for ${unitName}.`
           );
         }
       }
@@ -206,7 +246,7 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
 
     setIsLoading(true);
     try {
-      const result = loginResidentWithPin(phoneNumber, trimmedPin);
+      const result = loginResidentWithPin(phoneNumber, trimmedPin, activeFlat.id);
 
       if (!result.success) {
         setErrorMessage(result.error || 'Incorrect security PIN. Please try again.');
@@ -313,6 +353,9 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
 
   const handleResetToPhoneStep = () => {
     setStep('phone');
+    setActiveFlat(null);
+    setMatchingFlats([]);
+    setIsSecretaryUser(false);
     setEnteredPin('');
     setNewPin('');
     setConfirmPin('');
@@ -447,6 +490,135 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
       )}
 
       {/* ========================================================================= */}
+      {/* STEP 1.5: MULTI-UNIT SELECTION (e.g. Flat 101 & Flat 402, Shops -02 & Flat 01) */}
+      {/* ========================================================================= */}
+      {step === 'select_unit' && (
+        <div className="space-y-4">
+          <div className="bg-amber-50/90 border border-amber-200/80 rounded-2xl p-3.5 flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-600 text-white flex items-center justify-center shrink-0 font-black shadow-xs text-sm">
+              {matchingFlats.length}
+            </div>
+            <div className="flex-1 min-w-0">
+              <h4 className="text-xs font-bold text-amber-950 uppercase tracking-wide">
+                Multiple Units Registered
+              </h4>
+              <p className="text-xs text-amber-800 leading-snug mt-0.5">
+                Mobile number <span className="font-mono font-bold">+91 {getCleanDigits(phoneNumber).slice(-10)}</span> is linked with <strong>{matchingFlats.length} units</strong>. Select which one you want to view:
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-2.5">
+            {matchingFlats.map((flatItem) => {
+              const isShop = flatItem.flatNumber.toLowerCase().includes('shop');
+              const displayTitle = flatItem.flatNumber.toLowerCase().startsWith('flat') || isShop
+                ? flatItem.flatNumber
+                : `Flat ${flatItem.flatNumber}`;
+              const hasPin = Boolean(flatItem.pin && flatItem.pin.trim().length >= 4);
+
+              return (
+                <button
+                  key={flatItem.id}
+                  type="button"
+                  onClick={() => selectFlatAndProceed(flatItem)}
+                  className="w-full text-left p-3.5 rounded-2xl border-2 border-slate-200 hover:border-amber-500 hover:bg-amber-50/40 bg-white transition-all shadow-xs hover:shadow-md flex items-center justify-between group cursor-pointer"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div
+                      className={`w-11 h-11 rounded-xl flex items-center justify-center font-black text-sm shrink-0 shadow-xs transition-colors ${
+                        isShop
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-slate-900 text-white group-hover:bg-amber-600'
+                      }`}
+                    >
+                      {isShop ? '🏪' : '🏠'}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-slate-900 text-sm group-hover:text-amber-900 truncate">
+                          View as {displayTitle}
+                        </span>
+                        {hasPin ? (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                            PIN Protected
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 shrink-0">
+                            Setup PIN
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-1.5 truncate">
+                        <span className="font-medium text-slate-700">{flatItem.ownerName}</span>
+                        <span>&bull;</span>
+                        <span className="font-mono text-slate-500 text-[11px]">
+                          Meter: {flatItem.meterNumber}
+                        </span>
+                        <span>&bull;</span>
+                        <span>{flatItem.floor === 0 ? 'Ground' : `Fl. ${flatItem.floor}`}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-amber-700 group-hover:translate-x-1 transition-transform shrink-0 pl-2">
+                    <span className="hidden sm:inline">Select</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </div>
+                </button>
+              );
+            })}
+
+            {/* If user is also Secretary / Admin (e.g. Mohammad Shariq Ansari) */}
+            {isSecretaryUser && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAdminLogin(true);
+                  setAdminIdentifier(getCleanDigits(phoneNumber).slice(-10));
+                  setAdminError('');
+                }}
+                className="w-full text-left p-3.5 rounded-2xl border-2 border-indigo-200 hover:border-indigo-500 hover:bg-indigo-50/50 bg-white transition-all shadow-xs flex items-center justify-between group cursor-pointer"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-11 h-11 rounded-xl bg-indigo-700 text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-xs">
+                    <ShieldCheck className="w-6 h-6" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-indigo-950 text-sm truncate">
+                        Secretary Admin Console
+                      </span>
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 border border-indigo-200 shrink-0">
+                        Admin Portal
+                      </span>
+                    </div>
+                    <div className="text-xs text-indigo-700 mt-0.5">
+                      Full society management, billing, expenses & settings
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 group-hover:translate-x-1 transition-transform shrink-0 pl-2">
+                  <span className="hidden sm:inline">Access</span>
+                  <ArrowRight className="w-4 h-4" />
+                </div>
+              </button>
+            )}
+          </div>
+
+          <div className="pt-2 text-center">
+            <button
+              type="button"
+              onClick={handleResetToPhoneStep}
+              className="text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors cursor-pointer inline-flex items-center gap-1"
+            >
+              &larr; Use a different mobile number
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
       {/* STEP 2A: FIRST-TIME LOGIN -> SET & CONFIRM 4-DIGIT PIN */}
       {/* ========================================================================= */}
       {step === 'set_pin' && activeFlat && (
@@ -455,34 +627,45 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
           <div className="p-3.5 bg-amber-50 border border-amber-200/80 rounded-2xl flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
               <div className="w-9 h-9 rounded-xl bg-amber-600 text-white flex items-center justify-center font-black text-xs shrink-0">
-                F-{activeFlat.flatNumber}
+                {activeFlat.flatNumber.toLowerCase().includes('shop') ? '🏪' : '🏠'}
               </div>
               <div>
                 <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                  <span>{activeFlat.ownerName}</span>
+                  <span>View as {activeFlat.flatNumber.toLowerCase().startsWith('flat') || activeFlat.flatNumber.toLowerCase().includes('shop') ? activeFlat.flatNumber : `Flat ${activeFlat.flatNumber}`}</span>
                   <span className="text-[10px] bg-amber-200/80 text-amber-900 font-bold px-1.5 py-0.5 rounded">
                     First-Time Setup
                   </span>
                 </div>
-                <div className="text-[11px] font-mono text-slate-500">
-                  +91 {getCleanDigits(phoneNumber).slice(-10)}
+                <div className="text-[11px] text-slate-600">
+                  {activeFlat.ownerName} &bull; +91 {getCleanDigits(phoneNumber).slice(-10)}
                 </div>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={handleResetToPhoneStep}
-              className="text-xs text-amber-700 hover:text-amber-900 font-bold underline shrink-0 cursor-pointer"
-            >
-              Change
-            </button>
+            <div className="flex items-center gap-2">
+              {matchingFlats.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setStep('select_unit')}
+                  className="text-xs text-amber-800 hover:text-amber-950 font-bold bg-amber-100/80 hover:bg-amber-200/80 px-2 py-1 rounded-lg shrink-0 cursor-pointer transition-colors"
+                >
+                  Switch Unit
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleResetToPhoneStep}
+                className="text-xs text-slate-500 hover:text-slate-800 font-semibold underline shrink-0 cursor-pointer"
+              >
+                Change
+              </button>
+            </div>
           </div>
 
           <div className="text-center pt-1">
             <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 mb-1.5">
               <KeyRound className="w-5 h-5" />
             </div>
-            <h3 className="text-sm font-bold text-slate-900">Set Your Security PIN</h3>
+            <h3 className="text-sm font-bold text-slate-900">Set Security PIN for {activeFlat.flatNumber}</h3>
             <p className="text-[11px] text-slate-500 mt-0.5 max-w-xs mx-auto">
               Choose a 4-digit PIN to securely access your bills and receipts anytime without waiting for SMS OTPs.
             </p>
@@ -548,10 +731,10 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
           <div className="flex gap-2.5 pt-2">
             <button
               type="button"
-              onClick={handleResetToPhoneStep}
+              onClick={matchingFlats.length > 1 ? () => setStep('select_unit') : handleResetToPhoneStep}
               className="py-3 px-4 border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold text-xs rounded-2xl transition-colors cursor-pointer"
             >
-              Back
+              {matchingFlats.length > 1 ? '← Back to Units' : 'Back'}
             </button>
             <button
               type="submit"
@@ -583,24 +766,35 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
           <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
               <div className="w-9 h-9 rounded-xl bg-slate-900 text-white flex items-center justify-center font-black text-xs shrink-0">
-                F-{activeFlat.flatNumber}
+                {activeFlat.flatNumber.toLowerCase().includes('shop') ? '🏪' : '🏠'}
               </div>
               <div>
                 <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                  <span>{activeFlat.ownerName}</span>
+                  <span>View as {activeFlat.flatNumber.toLowerCase().startsWith('flat') || activeFlat.flatNumber.toLowerCase().includes('shop') ? activeFlat.flatNumber : `Flat ${activeFlat.flatNumber}`}</span>
                 </div>
-                <div className="text-[11px] font-mono text-slate-500">
-                  +91 {getCleanDigits(phoneNumber).slice(-10)}
+                <div className="text-[11px] text-slate-500">
+                  {activeFlat.ownerName} &bull; +91 {getCleanDigits(phoneNumber).slice(-10)}
                 </div>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={handleResetToPhoneStep}
-              className="text-xs text-amber-700 hover:text-amber-900 font-bold underline shrink-0 cursor-pointer"
-            >
-              Change
-            </button>
+            <div className="flex items-center gap-2">
+              {matchingFlats.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setStep('select_unit')}
+                  className="text-xs text-amber-800 hover:text-amber-950 font-bold bg-amber-100 hover:bg-amber-200 px-2 py-1 rounded-lg shrink-0 cursor-pointer transition-colors"
+                >
+                  Switch Unit
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleResetToPhoneStep}
+                className="text-xs text-slate-500 hover:text-slate-800 font-semibold underline shrink-0 cursor-pointer"
+              >
+                Change
+              </button>
+            </div>
           </div>
 
           <div>
@@ -644,7 +838,7 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
               </button>
             </div>
             <p className="text-[11px] text-slate-500 mt-1.5 text-center">
-              Enter your 4-digit security PIN for Flat {activeFlat.flatNumber}.
+              Enter your 4-digit security PIN for {activeFlat.flatNumber}.
             </p>
           </div>
 
@@ -664,10 +858,10 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
           <div className="flex gap-2.5 pt-1">
             <button
               type="button"
-              onClick={handleResetToPhoneStep}
+              onClick={matchingFlats.length > 1 ? () => setStep('select_unit') : handleResetToPhoneStep}
               className="py-3.5 px-4 border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold text-xs rounded-2xl transition-colors cursor-pointer"
             >
-              Back
+              {matchingFlats.length > 1 ? '← Back to Units' : 'Back'}
             </button>
             <button
               type="submit"
@@ -682,7 +876,7 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
               ) : (
                 <>
                   <UserCheck className="w-4 h-4" />
-                  <span>Sign In to Flat {activeFlat.flatNumber}</span>
+                  <span>Sign In to {activeFlat.flatNumber.toLowerCase().startsWith('flat') || activeFlat.flatNumber.toLowerCase().includes('shop') ? activeFlat.flatNumber : `Flat ${activeFlat.flatNumber}`}</span>
                 </>
               )}
             </button>
