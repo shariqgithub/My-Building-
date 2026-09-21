@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useBuilding } from '../context/BuildingContext';
-import { FlatReadingEntry, BillingCycle, CalculationMode, FlatInfo } from '../types';
+import { FlatReadingEntry, BillingCycle, CalculationMode, FlatInfo, CustomFeeColumn } from '../types';
 import { computeMonthlyBills, generateWhatsAppBillMessage } from '../utils/billingCalculator';
 import { BillInvoiceModal } from './BillInvoiceModal';
 import { EditFlatModal } from './EditFlatModal';
@@ -16,6 +16,7 @@ import {
   Users,
   Edit3,
   Save,
+  Plus,
   PlusCircle,
   Share2,
   DollarSign,
@@ -51,6 +52,7 @@ import {
   RotateCcw,
   AlertTriangle,
   Megaphone,
+  X,
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -64,11 +66,18 @@ export const AdminDashboard: React.FC = () => {
     updateSettings,
     applyChargesToAllFlats,
     updateChargeLabels,
+    addCustomFeeColumn,
+    removeCustomFeeColumn,
+    updateCustomFeeColumn,
+    updateFlatCustomCharge,
     updateFlat,
     updateFlatCustomRate,
     saveNewCycle,
     updateCycleReadings,
     markPaymentStatus,
+    resetMonthPaymentData,
+    resetAllPaymentsData,
+    removeMonthCycle,
     createNewCycle,
     addNotification,
     resetAllData,
@@ -81,6 +90,9 @@ export const AdminDashboard: React.FC = () => {
   } = useBuilding();
 
   const [activeTab, setActiveTab] = useState<'readings' | 'payments' | 'expenses' | 'settings' | 'flats' | 'broadcasts'>('readings');
+  const [showResetConfirmModal, setShowResetConfirmModal] = useState<'month' | 'all' | null>(null);
+  const [isResettingPayments, setIsResettingPayments] = useState(false);
+  const [resetSuccessMessage, setResetSuccessMessage] = useState<string | null>(null);
 
   // Reading Entry States
   const [selectedMonth, setSelectedMonth] = useState(activeCycle?.month || 'September 2026');
@@ -117,6 +129,7 @@ export const AdminDashboard: React.FC = () => {
         commonMeterLabel: string;
         maintenanceCharges: number;
         maintenanceLabel: string;
+        customCharges: Record<string, number>;
       }
     >
   >(() => {
@@ -129,10 +142,19 @@ export const AdminDashboard: React.FC = () => {
         commonMeterLabel: string;
         maintenanceCharges: number;
         maintenanceLabel: string;
+        customCharges: Record<string, number>;
       }
     > = {};
+    const cols = activeCycle?.customColumns || settings.customFeeColumns || [];
+
     if (activeCycle) {
       activeCycle.readings.forEach((r) => {
+        const charges = { ...(r.customCharges || {}) };
+        cols.forEach((col) => {
+          if (charges[col.id] === undefined && charges[col.name] === undefined) {
+            charges[col.id] = col.defaultAmount;
+          }
+        });
         map[r.flatId] = {
           current: r.currentReading,
           previous: r.previousReading,
@@ -140,10 +162,15 @@ export const AdminDashboard: React.FC = () => {
           commonMeterLabel: r.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light',
           maintenanceCharges: r.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110,
           maintenanceLabel: r.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning',
+          customCharges: charges,
         };
       });
     } else {
       flats.forEach((f) => {
+        const charges: Record<string, number> = {};
+        cols.forEach((col) => {
+          charges[col.id] = col.defaultAmount;
+        });
         map[f.id] = {
           current: f.baselineReading + 100,
           previous: f.baselineReading,
@@ -151,11 +178,20 @@ export const AdminDashboard: React.FC = () => {
           commonMeterLabel: settings.defaultCommonMeterLabel || 'Water & stairs light',
           maintenanceCharges: settings.defaultMaintenanceCharges ?? 110,
           maintenanceLabel: settings.defaultMaintenanceLabel || 'Cleaning',
+          customCharges: charges,
         };
       });
     }
     return map;
   });
+
+  // Dynamic column management state
+  const [isAddColumnModalOpen, setIsAddColumnModalOpen] = useState(false);
+  const [newColumnName, setNewColumnName] = useState('');
+  const [newColumnAmount, setNewColumnAmount] = useState<number>(100);
+  const [applyColumnToAll, setApplyColumnToAll] = useState(true);
+  const [columnErrorMsg, setColumnErrorMsg] = useState('');
+  const [columnSuccessToast, setColumnSuccessToast] = useState('');
 
   const [filterPayment, setFilterPayment] = useState<'all' | 'paid' | 'unpaid' | 'pending' | 'partially_paid'>('all');
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
@@ -234,10 +270,20 @@ export const AdminDashboard: React.FC = () => {
         commonMeterLabel: string;
         maintenanceCharges: number;
         maintenanceLabel: string;
+        customCharges: Record<string, number>;
       }
     > = {};
 
+    const cycleCols = activeCycle.customColumns || settings.customFeeColumns || [];
+
     activeCycle.readings.forEach((r) => {
+      const charges = { ...(r.customCharges || {}) };
+      cycleCols.forEach((col) => {
+        if (charges[col.id] === undefined && charges[col.name] === undefined) {
+          charges[col.id] = col.defaultAmount;
+        }
+      });
+
       map[r.flatId] = {
         current: r.currentReading,
         previous: r.previousReading,
@@ -245,6 +291,7 @@ export const AdminDashboard: React.FC = () => {
         commonMeterLabel: r.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light',
         maintenanceCharges: r.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110,
         maintenanceLabel: r.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning',
+        customCharges: charges,
       };
     });
     setDraftReadings(map);
@@ -347,6 +394,10 @@ export const AdminDashboard: React.FC = () => {
     setTimeout(() => setChargesSuccessMsg(''), 5000);
   };
 
+  // Dynamic custom columns in active cycle or settings
+  const activeCustomColumns: CustomFeeColumn[] =
+    activeCycle?.customColumns || settings.customFeeColumns || [];
+
   // Calculate live preview of consumption & amounts
   const previewCalculation = computeMonthlyBills({
     flats,
@@ -359,6 +410,7 @@ export const AdminDashboard: React.FC = () => {
     },
     calculationMode: settings.calculationMode,
     defaultRatePerUnit: settings.defaultRatePerUnit,
+    customColumns: activeCustomColumns,
     readings: flats.map((f) => ({
       flatId: f.id,
       previousReading: draftReadings[f.id]?.previous ?? f.baselineReading,
@@ -367,6 +419,7 @@ export const AdminDashboard: React.FC = () => {
       maintenanceLabel: draftReadings[f.id]?.maintenanceLabel || maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning',
       commonMeterCharges: draftReadings[f.id]?.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160,
       commonMeterLabel: draftReadings[f.id]?.commonMeterLabel || commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light',
+      customCharges: draftReadings[f.id]?.customCharges || {},
     })),
   });
 
@@ -378,6 +431,7 @@ export const AdminDashboard: React.FC = () => {
         ...pr,
         commonMeterLabel: draftReadings[pr.flatId]?.commonMeterLabel || commonMeterLabel,
         maintenanceLabel: draftReadings[pr.flatId]?.maintenanceLabel || maintenanceLabel,
+        customCharges: draftReadings[pr.flatId]?.customCharges || pr.customCharges || {},
         paymentStatus: existing ? existing.paymentStatus : 'unpaid',
         paidAmount: existing?.paidAmount,
         paidDate: existing?.paidDate,
@@ -387,16 +441,122 @@ export const AdminDashboard: React.FC = () => {
       };
     });
 
-    updateCycleReadings(activeCycle.id, updatedEntries, {
-      mainMeterPreviousReading: mainPrevReading,
-      mainMeterCurrentReading: mainCurrReading,
-      mainMeterUnits: mainUnits,
-      mainMeterBillAmount: mainBillAmount,
-      commonAreaRule: 'divide_by_flat_units',
+    updateCycleReadings(
+      activeCycle.id,
+      updatedEntries,
+      {
+        mainMeterPreviousReading: mainPrevReading,
+        mainMeterCurrentReading: mainCurrReading,
+        mainMeterUnits: mainUnits,
+        mainMeterBillAmount: mainBillAmount,
+        commonAreaRule: 'divide_by_flat_units',
+      },
+      activeCustomColumns
+    );
+
+    setSaveSuccessMsg('Readings, maintenance & custom fees saved!');
+    setTimeout(() => setSaveSuccessMsg(''), 3000);
+  };
+
+  // Custom column management actions
+  const handleOpenAddColumnModal = () => {
+    setNewColumnName('');
+    setNewColumnAmount(100);
+    setApplyColumnToAll(true);
+    setColumnErrorMsg('');
+    setIsAddColumnModalOpen(true);
+  };
+
+  const handleCreateColumn = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmed = newColumnName.trim();
+    if (!trimmed) {
+      setColumnErrorMsg('Please enter a column or fee name (e.g. Building Charge, Lift Maintenance)');
+      return;
+    }
+
+    const amt = Number(newColumnAmount) || 0;
+    const newCol = addCustomFeeColumn(
+      { name: trimmed, defaultAmount: amt },
+      applyColumnToAll,
+      activeCycle.id
+    );
+
+    // Update draftReadings locally so the table inputs display the new values right away
+    if (applyColumnToAll) {
+      setDraftReadings((prev) => {
+        const updated = { ...prev };
+        flats.forEach((f) => {
+          const currentFlatCharges = { ...(updated[f.id]?.customCharges || {}) };
+          currentFlatCharges[newCol.id] = amt;
+          updated[f.id] = {
+            ...(updated[f.id] || {
+              current: f.baselineReading + 100,
+              previous: f.baselineReading,
+              commonMeterCharges: 160,
+              commonMeterLabel: 'Water & stairs light',
+              maintenanceCharges: 110,
+              maintenanceLabel: 'Cleaning',
+            }),
+            customCharges: currentFlatCharges,
+          };
+        });
+        return updated;
+      });
+    }
+
+    setColumnSuccessToast(`New column "${trimmed}" (₹${amt}) added! All receipts and bills auto-updated.`);
+    setTimeout(() => setColumnSuccessToast(''), 4500);
+    setIsAddColumnModalOpen(false);
+  };
+
+  const handleCustomChargeInputChange = (flatId: string, columnId: string, val: number) => {
+    setDraftReadings((prev) => {
+      const updated = { ...prev };
+      const flatEntry = updated[flatId] || {
+        current: 100,
+        previous: 0,
+        commonMeterCharges: 160,
+        commonMeterLabel: 'Common meter',
+        maintenanceCharges: 110,
+        maintenanceLabel: 'Cleaning',
+        customCharges: {},
+      };
+      const flatCustomCharges = { ...(flatEntry.customCharges || {}) };
+      flatCustomCharges[columnId] = val;
+
+      updated[flatId] = {
+        ...flatEntry,
+        customCharges: flatCustomCharges,
+      };
+      return updated;
     });
 
-    setSaveSuccessMsg('Readings, maintenance & common charges saved!');
-    setTimeout(() => setSaveSuccessMsg(''), 3000);
+    updateFlatCustomCharge(activeCycle.id, flatId, columnId, val);
+  };
+
+  const handleRemoveColumn = (columnId: string, columnName: string) => {
+    if (!window.confirm(`Remove column "${columnName}" from table and receipts?`)) {
+      return;
+    }
+    removeCustomFeeColumn(columnId, activeCycle.id);
+    setDraftReadings((prev) => {
+      const updated = { ...prev };
+      Object.keys(updated).forEach((fid) => {
+        if (updated[fid]?.customCharges) {
+          const charges = { ...updated[fid].customCharges };
+          delete charges[columnId];
+          updated[fid] = { ...updated[fid], customCharges: charges };
+        }
+      });
+      return updated;
+    });
+    setColumnSuccessToast(`Column "${columnName}" removed.`);
+    setTimeout(() => setColumnSuccessToast(''), 3000);
+  };
+
+  const handleRenameColumn = (columnId: string, newName: string) => {
+    updateCustomFeeColumn(columnId, { name: newName }, activeCycle.id);
   };
 
   // Quick WhatsApp bill sender with user's exact required format
@@ -414,6 +574,8 @@ export const AdminDashboard: React.FC = () => {
       commonMeterLabel: reading.commonMeterLabel || draftReadings[reading.flatId]?.commonMeterLabel || commonMeterLabel || 'Common meter',
       maintenanceCharges: reading.maintenanceCharges ?? draftReadings[reading.flatId]?.maintenanceCharges ?? 110,
       maintenanceLabel: reading.maintenanceLabel || draftReadings[reading.flatId]?.maintenanceLabel || maintenanceLabel || 'Cleaning',
+      customColumns: activeCustomColumns,
+      customCharges: reading.customCharges || draftReadings[reading.flatId]?.customCharges || {},
       totalBillAmount: reading.totalBillAmount,
       previousBalance: reading.previousBalance,
       netPayableAmount: reading.netPayableAmount,
@@ -541,6 +703,23 @@ export const AdminDashboard: React.FC = () => {
               </option>
             ))}
           </select>
+          {cycles.length > 1 && (
+            <button
+              type="button"
+              onClick={async () => {
+                if (window.confirm(`Are you sure you want to delete the "${activeCycle.month}" billing cycle? This will remove this month permanently.`)) {
+                  await removeMonthCycle(activeCycle.id);
+                  setSaveSuccessMsg(`Deleted ${activeCycle.month} billing statement.`);
+                  setTimeout(() => setSaveSuccessMsg(''), 4000);
+                }
+              }}
+              className="inline-flex items-center gap-1 px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-semibold rounded-lg border border-red-200 transition-colors cursor-pointer"
+              title={`Delete ${activeCycle.month} billing cycle`}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete Month</span>
+            </button>
+          )}
           <span className="text-[11px] text-slate-400">
             Due Date: <strong className="text-slate-700">{activeCycle.dueDate}</strong>
           </span>
@@ -746,6 +925,16 @@ export const AdminDashboard: React.FC = () => {
                   </span>
                 )}
                 <button
+                  type="button"
+                  id="add-column-top-btn"
+                  onClick={handleOpenAddColumnModal}
+                  className="py-1.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                  title="Add a new fee column to this table (e.g. Building Charge, Lift Maintenance)"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Column</span>
+                </button>
+                <button
                   onClick={handleSaveReadings}
                   className="py-1.5 px-3.5 bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs rounded-xl flex items-center gap-1.5 shadow-xs transition-colors"
                 >
@@ -850,6 +1039,41 @@ export const AdminDashboard: React.FC = () => {
                   />
                 </div>
               </div>
+
+              {/* Added Dynamic Fee Columns (e.g. Building Charge) */}
+              {activeCustomColumns.length > 0 && (
+                <div className="mt-3 pt-2.5 border-t border-slate-200/80">
+                  <span className="text-[11px] font-bold text-slate-700 block mb-1.5">
+                    Added Dynamic Fee Columns:
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {activeCustomColumns.map((col) => (
+                      <div
+                        key={col.id}
+                        className="flex items-center gap-1.5 bg-white border border-indigo-200 text-indigo-950 px-2.5 py-1 rounded-xl shadow-2xs text-xs font-semibold"
+                      >
+                        <span>{col.name}</span>
+                        <span className="text-indigo-600 font-mono font-bold">(₹{col.defaultAmount})</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveColumn(col.id, col.name)}
+                          className="text-slate-400 hover:text-rose-600 p-0.5 rounded transition-colors ml-1 cursor-pointer"
+                          title={`Remove ${col.name} column`}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={handleOpenAddColumnModal}
+                      className="inline-flex items-center gap-1 text-xs font-bold text-indigo-700 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-dashed border-indigo-300 px-2.5 py-1 rounded-xl transition-colors cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" /> Add Another Column
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="overflow-x-auto">
@@ -896,6 +1120,47 @@ export const AdminDashboard: React.FC = () => {
                         <span className="text-[10px] text-slate-400 mt-0.5">(₹) Amount</span>
                       </div>
                     </th>
+
+                    {/* Dynamic Custom Fee Columns */}
+                    {activeCustomColumns.map((col) => (
+                      <th key={col.id} className="p-2.5 text-center min-w-32 bg-indigo-50/50 border-l border-indigo-100">
+                        <div className="flex flex-col items-center">
+                          <div className="flex items-center gap-1 bg-white px-2 py-0.5 rounded-lg border border-indigo-300 hover:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/30">
+                            <input
+                              type="text"
+                              value={col.name}
+                              onChange={(e) => handleRenameColumn(col.id, e.target.value)}
+                              className="w-24 text-center text-xs font-bold text-indigo-950 bg-transparent focus:outline-hidden"
+                              title="Click or type to edit this column name"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveColumn(col.id, col.name)}
+                              className="text-slate-400 hover:text-rose-600 transition-colors p-0.5 cursor-pointer"
+                              title={`Remove ${col.name} column`}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                          <span className="text-[10px] text-indigo-600 mt-0.5 font-medium">(₹) Amount</span>
+                        </div>
+                      </th>
+                    ))}
+
+                    {/* Header button to quickly add column */}
+                    <th className="p-2.5 text-center w-28 bg-slate-50 border-l border-slate-200">
+                      <button
+                        type="button"
+                        id="add-column-table-header-btn"
+                        onClick={handleOpenAddColumnModal}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-800 bg-white hover:bg-indigo-50 border border-dashed border-indigo-300 hover:border-indigo-400 rounded-lg transition-all shadow-2xs whitespace-nowrap cursor-pointer"
+                        title="Add an extra fee column like Building Charge"
+                      >
+                        <Plus className="w-3 h-3 text-indigo-600" />
+                        <span>Add Col</span>
+                      </button>
+                    </th>
+
                     <th className="p-2.5 text-right">Total Bill</th>
                   </tr>
                 </thead>
@@ -913,7 +1178,16 @@ export const AdminDashboard: React.FC = () => {
                     const energyAmt = Math.round(units * rate);
                     const commonAmt = draftReadings[flat.id]?.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160;
                     const maintAmt = draftReadings[flat.id]?.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110;
-                    const totalAmt = energyAmt + commonAmt + maintAmt;
+
+                    // Sum all custom charges for this flat
+                    let customChargesSum = 0;
+                    activeCustomColumns.forEach((col) => {
+                      const flatCharges = draftReadings[flat.id]?.customCharges;
+                      const val = flatCharges?.[col.id] ?? flatCharges?.[col.name] ?? col.defaultAmount ?? 0;
+                      customChargesSum += Number(val) || 0;
+                    });
+
+                    const totalAmt = energyAmt + commonAmt + maintAmt + customChargesSum;
 
                     return (
                       <tr key={flat.id} className="hover:bg-slate-50/70 transition-colors">
@@ -1039,7 +1313,33 @@ export const AdminDashboard: React.FC = () => {
                             placeholder="110"
                           />
                         </td>
-                        <td className="p-2.5 text-right font-extrabold text-amber-800">
+
+                        {/* Dynamic Custom Fee Columns Inputs */}
+                        {activeCustomColumns.map((col) => {
+                          const flatCharges = draftReadings[flat.id]?.customCharges;
+                          const val = flatCharges?.[col.id] ?? flatCharges?.[col.name] ?? col.defaultAmount ?? 0;
+                          return (
+                            <td key={col.id} className="p-2.5 text-center bg-indigo-50/20 border-l border-indigo-100/60">
+                              <input
+                                type="number"
+                                value={val}
+                                onChange={(e) =>
+                                  handleCustomChargeInputChange(flat.id, col.id, Number(e.target.value))
+                                }
+                                className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-indigo-200 bg-white focus:ring-2 focus:ring-indigo-500/30 text-center text-indigo-950"
+                                placeholder={String(col.defaultAmount)}
+                                title={`${col.name} for Flat ${flat.flatNumber}`}
+                              />
+                            </td>
+                          );
+                        })}
+
+                        {/* Spacer Cell matching '+ Add Col' header button */}
+                        <td className="p-2.5 text-center text-[11px] text-slate-300 border-l border-slate-100 select-none">
+                          —
+                        </td>
+
+                        <td className="p-2.5 text-right font-extrabold text-amber-800 whitespace-nowrap">
                           ₹{totalAmt.toLocaleString('en-IN')}/-
                         </td>
                       </tr>
@@ -1120,10 +1420,142 @@ export const AdminDashboard: React.FC = () => {
               </button>
             </div>
 
-            <span className="text-xs text-slate-500 font-medium">
-              Collected: <strong className="text-emerald-700">₹{activeCycle.totalCollectedAmount.toLocaleString('en-IN')}</strong> / ₹{activeCycle.totalBilledAmount.toLocaleString('en-IN')}
-            </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-slate-500 font-medium mr-1">
+                Collected: <strong className="text-emerald-700 font-bold">₹{activeCycle.totalCollectedAmount.toLocaleString('en-IN')}</strong> / ₹{activeCycle.totalBilledAmount.toLocaleString('en-IN')}
+              </span>
+
+              {/* Reset Month Payment Data Button */}
+              <button
+                type="button"
+                id="reset-month-payments-btn"
+                onClick={() => setShowResetConfirmModal('month')}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-800 border border-rose-200 rounded-lg text-xs font-bold transition-all shadow-2xs cursor-pointer"
+                title={`Reset all payments for ${activeCycle.month} back to ₹0 (unpaid)`}
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
+                <span>Reset Month Payments</span>
+              </button>
+
+              {/* Reset All Months Button */}
+              <button
+                type="button"
+                id="reset-all-payments-btn"
+                onClick={() => setShowResetConfirmModal('all')}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 border border-slate-200 rounded-lg text-xs font-semibold transition-all shadow-2xs cursor-pointer"
+                title="Reset all payment records across every billing month to ₹0"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                <span>Reset All Months</span>
+              </button>
+            </div>
           </div>
+
+          {/* Feedback message banner */}
+          {resetSuccessMessage && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium rounded-xl flex items-center justify-between animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{resetSuccessMessage}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setResetSuccessMessage(null)}
+                className="text-emerald-600 hover:text-emerald-800 p-1"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Reset Payment Confirmation Modal */}
+          {showResetConfirmModal && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-md w-full p-5 border border-slate-200 shadow-2xl animate-in zoom-in-95 duration-150">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                    <AlertTriangle className="w-5 h-5 text-rose-600" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="text-base font-bold text-slate-900">
+                      {showResetConfirmModal === 'month'
+                        ? `Reset Payments for ${activeCycle.month}?`
+                        : 'Reset All Payments Across All Months?'}
+                    </h3>
+                    <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+                      {showResetConfirmModal === 'month' ? (
+                        <>
+                          This will reset all 15 flat payments for{' '}
+                          <strong className="text-slate-900">{activeCycle.month}</strong> back to{' '}
+                          <strong className="text-rose-700">unpaid</strong>. All recorded UPI/Cash payments, transaction dates, and collected amounts for this month will be cleared back to{' '}
+                          <strong className="text-slate-900">₹0</strong>.
+                        </>
+                      ) : (
+                        <>
+                          This will assume{' '}
+                          <strong className="text-slate-900">no payment has been received from anyone in any month</strong>. All flat records in every billing cycle will be set to{' '}
+                          <strong className="text-rose-700">unpaid</strong> with ₹0 collected.
+                        </>
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5">
+                  <button
+                    type="button"
+                    disabled={isResettingPayments}
+                    onClick={() => setShowResetConfirmModal(null)}
+                    className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isResettingPayments}
+                    onClick={async () => {
+                      setIsResettingPayments(true);
+                      try {
+                        if (showResetConfirmModal === 'month') {
+                          await resetMonthPaymentData(activeCycle.id);
+                          setResetSuccessMessage(
+                            `Payment data for ${activeCycle.month} has been reset: all flats are now unpaid with ₹0 collected.`
+                          );
+                        } else {
+                          await resetAllPaymentsData();
+                          setResetSuccessMessage(
+                            'All payment records across all months have been reset to unpaid (₹0 collected).'
+                          );
+                        }
+                        setShowResetConfirmModal(null);
+                      } catch (err) {
+                        alert('Failed to reset payment data: ' + (err instanceof Error ? err.message : String(err)));
+                      } finally {
+                        setIsResettingPayments(false);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {isResettingPayments ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Resetting...</span>
+                      </>
+                    ) : (
+                      <>
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>
+                          {showResetConfirmModal === 'month'
+                            ? `Yes, Reset ${activeCycle.month}`
+                            : 'Yes, Reset All Months'}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Cards for each flat */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
@@ -2013,6 +2445,32 @@ export const AdminDashboard: React.FC = () => {
             <div className="max-w-md space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Admin / Secretary Full Name
+                </label>
+                <input
+                  type="text"
+                  value={settings.adminName || 'Mohammad Shariq Ansari'}
+                  onChange={(e) => updateSettings({ adminName: e.target.value })}
+                  placeholder="Mohammad Shariq Ansari"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Admin / Secretary Phone Number
+                </label>
+                <input
+                  type="tel"
+                  value={settings.adminPhone || '8077649394'}
+                  onChange={(e) => updateSettings({ adminPhone: e.target.value.replace(/\D/g, '') })}
+                  placeholder="8077649394"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Registered Administrator Email
                 </label>
                 <input
@@ -2118,23 +2576,43 @@ export const AdminDashboard: React.FC = () => {
             <p className="text-xs text-rose-700/80 mb-3">
               This action is strictly restricted to authenticated Society Admins. Only perform this if you wish to wipe all current billing records and reset the database back to default initial values.
             </p>
-            <button
-              type="button"
-              onClick={() => {
-                const confirmed = window.confirm(
-                  'DANGER: Are you sure you want to reset all data? This will restore the 15 baseline flats and initial ₹16,000 billing cycle. All custom flats and manual entries will be reset.'
-                );
-                if (confirmed) {
-                  resetAllData();
-                  setSaveSuccessMsg('System reset to baseline sample data successfully.');
-                  setTimeout(() => setSaveSuccessMsg(''), 4000);
-                }
-              }}
-              className="text-xs font-bold text-rose-700 hover:text-rose-800 bg-white hover:bg-rose-100 border border-rose-300 px-3.5 py-2 rounded-xl flex items-center gap-2 transition-colors cursor-pointer shadow-2xs"
-            >
-              <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
-              Reset Database to Initial Baseline
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  const confirmed = window.confirm(
+                    'DANGER: Are you sure you want to reset all data? This will restore the 15 baseline flats and initial ₹16,000 billing cycle. All custom flats and manual entries will be reset.'
+                  );
+                  if (confirmed) {
+                    resetAllData();
+                    setSaveSuccessMsg('System reset to baseline sample data successfully.');
+                    setTimeout(() => setSaveSuccessMsg(''), 4000);
+                  }
+                }}
+                className="text-xs font-bold text-rose-700 hover:text-rose-800 bg-white hover:bg-rose-100 border border-rose-300 px-3.5 py-2 rounded-xl flex items-center gap-2 transition-colors cursor-pointer shadow-2xs"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
+                Reset Database to Initial Baseline
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  const confirmed = window.confirm(
+                    'Are you sure you want to reset all payment records across all months to unpaid (assuming ₹0 received)?'
+                  );
+                  if (confirmed) {
+                    await resetAllPaymentsData();
+                    setSaveSuccessMsg('All payment records reset to unpaid (₹0 collected).');
+                    setTimeout(() => setSaveSuccessMsg(''), 4000);
+                  }
+                }}
+                className="text-xs font-bold text-amber-800 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 px-3.5 py-2 rounded-xl flex items-center gap-2 transition-colors cursor-pointer shadow-2xs"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-amber-700" />
+                Reset All Payments (Assume ₹0 Received)
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2616,6 +3094,147 @@ export const AdminDashboard: React.FC = () => {
             setTimeout(() => setSaveSuccessMsg(''), 3000);
           }}
         />
+      )}
+
+      {/* Dynamic Add Column Modal (Requirement: Add new column for fees like Building Charge) */}
+      {isAddColumnModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
+                  <Plus className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Add New Fee Column</h3>
+                  <p className="text-[11px] text-slate-500">
+                    Add extra fee to table, receipts & WhatsApp bills
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddColumnModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateColumn} className="mt-4 space-y-4">
+              {columnErrorMsg && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{columnErrorMsg}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  Column / Fee Name <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={newColumnName}
+                  onChange={(e) => {
+                    setNewColumnName(e.target.value);
+                    if (columnErrorMsg) setColumnErrorMsg('');
+                  }}
+                  placeholder="e.g. Building Charge, Lift Maintenance, Generator"
+                  className="w-full px-3 py-2 text-sm bg-slate-50 focus:bg-white border border-slate-300 focus:border-indigo-500 rounded-xl focus:ring-2 focus:ring-indigo-500/20 font-semibold"
+                  autoFocus
+                />
+
+                {/* Quick Presets */}
+                <div className="mt-2 flex flex-wrap gap-1.5 items-center">
+                  <span className="text-[10px] text-slate-400 font-semibold">Presets:</span>
+                  {[
+                    'Building Charge',
+                    'Lift Maintenance',
+                    'Generator Backup',
+                    'Security Guard',
+                    'Water Tanker',
+                    'Festival Fund',
+                  ].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setNewColumnName(preset)}
+                      className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 border border-slate-200 font-medium transition-colors"
+                    >
+                      + {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  Default Amount per Flat (₹)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-slate-400 font-bold text-sm">₹</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={newColumnAmount}
+                    onChange={(e) => setNewColumnAmount(Math.max(0, Number(e.target.value)))}
+                    className="w-full pl-7 pr-3 py-2 text-sm bg-slate-50 focus:bg-white border border-slate-300 focus:border-indigo-500 rounded-xl focus:ring-2 focus:ring-indigo-500/20 font-mono font-bold text-slate-900"
+                    placeholder="100"
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  You can also edit this amount for any flat individually directly in the table.
+                </p>
+              </div>
+
+              <div className="p-3 bg-indigo-50/60 rounded-xl border border-indigo-100">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={applyColumnToAll}
+                    onChange={(e) => setApplyColumnToAll(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                  />
+                  <div>
+                    <span className="text-xs font-bold text-indigo-950 block">
+                      Apply this fee to all 15 flats automatically
+                    </span>
+                    <span className="text-[11px] text-indigo-700/80 block leading-relaxed mt-0.5">
+                      Adds ₹{newColumnAmount || 0} to all flat bills and recalculates total bills immediately.
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              <div className="flex gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsAddColumnModalOpen(false)}
+                  className="flex-1 py-2 px-3 rounded-xl border border-slate-200 text-slate-600 font-semibold text-xs hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs shadow-xs transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add Column to Table
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Success Toast */}
+      {columnSuccessToast && (
+        <div className="fixed bottom-6 right-6 z-50 p-3.5 bg-indigo-950 text-white rounded-xl shadow-xl flex items-center gap-2.5 text-xs font-semibold animate-in slide-in-from-bottom-3 duration-200 border border-indigo-700 max-w-md">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{columnSuccessToast}</span>
+        </div>
       )}
     </div>
   );

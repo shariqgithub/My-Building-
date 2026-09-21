@@ -241,7 +241,11 @@ export const LockScreen: React.FC = () => {
               </div>
               <div>
                 <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                  <span>{currentSession?.name || flat?.ownerName || 'Active User'}</span>
+                  <span>
+                    {isAdmin
+                      ? 'Mohammad Shariq Ansari'
+                      : (currentSession?.name || flat?.ownerName || 'Active Resident')}
+                  </span>
                   <span
                     className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
                       isAdmin
@@ -249,11 +253,11 @@ export const LockScreen: React.FC = () => {
                         : 'bg-amber-100 text-amber-800'
                     }`}
                   >
-                    {isAdmin ? 'Secretary' : `Flat ${flat?.flatNumber || currentSession?.flatNumber}`}
+                    {isAdmin ? 'Secretary / Admin' : `Flat ${flat?.flatNumber || currentSession?.flatNumber}`}
                   </span>
                 </div>
                 <div className="text-[11px] text-slate-500 font-mono">
-                  +91 {currentSession?.phone?.slice(-10) || flat?.phone?.slice(-10) || 'Registered Number'}
+                  +91 {isAdmin ? '8077649394' : (currentSession?.phone?.slice(-10) || flat?.phone?.slice(-10) || 'Registered Number')}
                 </div>
               </div>
             </div>
@@ -565,8 +569,8 @@ export const LockScreen: React.FC = () => {
                   <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900">
                     <p className="font-semibold mb-1">To reset your PIN:</p>
                     <p>
-                      Please contact your society secretary at{' '}
-                      <strong>+91 {settings.adminPhone || '9876543210'}</strong> or society office to reset your flat's PIN.
+                      Please contact your society secretary (Mohammad Shariq Ansari) at{' '}
+                      <strong>+91 {settings.adminPhone || '8077649394'}</strong> or society office to reset your flat's PIN.
                     </p>
                   </div>
                   <p>

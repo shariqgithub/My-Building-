@@ -111,7 +111,7 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
           checkResult.error ||
             `Mobile number +91 ${tenDigit} is not registered with any flat in ${
               settings.buildingName || 'the building'
-            }. Please contact the society secretary to register your number.`
+            }. Please contact Society Secretary Mohammad Shariq Ansari (+91 8077649394) to register your number.`
         );
         setIsLoading(false);
         return;
@@ -656,7 +656,7 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
                 Forgot your PIN?
               </div>
               <p className="text-[11px] leading-relaxed text-amber-800">
-                Please ask the Society Secretary / Admin to reset the PIN for Flat {activeFlat.flatNumber}. Once reset in the Flats Management panel, you can set a brand new PIN right here on your next login.
+                Please contact Society Secretary Mohammad Shariq Ansari (+91 8077649394) to reset the PIN for Flat {activeFlat.flatNumber}. Once reset in the Flats Management panel, you can set a brand new PIN right here on your next login.
               </p>
             </div>
           )}
@@ -713,7 +713,7 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
               </div>
               <div>
                 <h4 className="text-sm font-bold text-slate-900">Society Office Sign In</h4>
-                <p className="text-[11px] text-slate-500">Secretary & Administrator Access</p>
+                <p className="text-[11px] text-slate-500">Secretary: Mohammad Shariq Ansari (+91 8077649394)</p>
               </div>
             </div>
 

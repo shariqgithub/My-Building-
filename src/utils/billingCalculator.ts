@@ -1,10 +1,11 @@
-import { FlatInfo, MainMeterBillInput, CalculationMode, FlatReadingEntry } from '../types';
+import { FlatInfo, MainMeterBillInput, CalculationMode, FlatReadingEntry, CustomFeeColumn } from '../types';
 
 export interface ComputeBillParams {
   flats: FlatInfo[];
   mainMeter: MainMeterBillInput;
   calculationMode: CalculationMode;
   defaultRatePerUnit: number;
+  customColumns?: CustomFeeColumn[];
   readings: Array<{
     flatId: string;
     previousReading: number;
@@ -13,6 +14,7 @@ export interface ComputeBillParams {
     maintenanceLabel?: string;
     commonMeterCharges?: number;
     commonMeterLabel?: string;
+    customCharges?: Record<string, number>;
     previousBalance?: number;
     paidAmount?: number;
   }>;
@@ -24,7 +26,7 @@ export function computeMonthlyBills(params: ComputeBillParams): {
   effectiveRatePerUnit: number;
   totalBilledAmount: number;
 } {
-  const { flats, mainMeter, calculationMode, defaultRatePerUnit, readings } = params;
+  const { flats, mainMeter, calculationMode, defaultRatePerUnit, readings, customColumns = [] } = params;
 
   // 1. Calculate units consumed and store manual charges for each flat
   const flatDataMap = new Map<
@@ -37,6 +39,7 @@ export function computeMonthlyBills(params: ComputeBillParams): {
       maintenanceLabel: string;
       commonMeterCharges: number;
       commonMeterLabel: string;
+      customCharges: Record<string, number>;
       previousBalance: number;
       paidAmount?: number;
     }
@@ -53,6 +56,7 @@ export function computeMonthlyBills(params: ComputeBillParams): {
       maintenanceLabel: r.maintenanceLabel || 'Cleaning',
       commonMeterCharges: r.commonMeterCharges ?? 160,
       commonMeterLabel: r.commonMeterLabel || 'Water & stairs light',
+      customCharges: r.customCharges || {},
       previousBalance: r.previousBalance ?? 0,
       paidAmount: r.paidAmount,
     });
@@ -73,10 +77,27 @@ export function computeMonthlyBills(params: ComputeBillParams): {
       maintenanceLabel: 'Cleaning',
       commonMeterCharges: 160,
       commonMeterLabel: 'Water & stairs light',
+      customCharges: {},
       previousBalance: 0,
     };
     const energyAmount = Math.round(data.units * rate);
-    const totalBill = energyAmount + (data.maintenanceCharges || 0) + (data.commonMeterCharges || 0);
+
+    // Sum custom charges for this flat
+    let customSum = 0;
+    const readingCustomCharges = { ...(data.customCharges || {}) };
+    customColumns.forEach((col) => {
+      const amt = readingCustomCharges[col.id] ?? readingCustomCharges[col.name] ?? col.defaultAmount ?? 0;
+      readingCustomCharges[col.id] = Number(amt) || 0;
+      customSum += Number(amt) || 0;
+    });
+    // Extra dynamic charges not explicitly in customColumns
+    Object.entries(readingCustomCharges).forEach(([k, v]) => {
+      if (!customColumns.some((c) => c.id === k || c.name === k)) {
+        customSum += Number(v) || 0;
+      }
+    });
+
+    const totalBill = energyAmount + (data.maintenanceCharges || 0) + (data.commonMeterCharges || 0) + customSum;
     const prevBal = data.previousBalance || 0;
     const netPayable = totalBill + prevBal;
     const paid = data.paidAmount;
@@ -103,6 +124,7 @@ export function computeMonthlyBills(params: ComputeBillParams): {
       maintenanceLabel: data.maintenanceLabel || 'Cleaning',
       commonMeterCharges: data.commonMeterCharges || 0,
       commonMeterLabel: data.commonMeterLabel || 'Water & stairs light',
+      customCharges: readingCustomCharges,
       totalBillAmount: totalBill,
       previousBalance: prevBal,
       netPayableAmount: netPayable,
@@ -220,6 +242,8 @@ export function generateWhatsAppBillMessage(params: {
   commonMeterLabel?: string;
   maintenanceCharges?: number;
   maintenanceLabel?: string;
+  customColumns?: CustomFeeColumn[];
+  customCharges?: Record<string, number>;
   totalBillAmount: number;
   previousBalance?: number;
   netPayableAmount?: number;
@@ -236,6 +260,8 @@ export function generateWhatsAppBillMessage(params: {
     commonMeterLabel = 'Water & stairs light',
     maintenanceCharges = 110,
     maintenanceLabel = 'Cleaning',
+    customColumns = [],
+    customCharges = {},
     totalBillAmount,
     previousBalance = 0,
     netPayableAmount,
@@ -247,6 +273,26 @@ export function generateWhatsAppBillMessage(params: {
   // Lines for common area & maintenance
   const commonMeterLine = `${commonMeterLabel} - *${commonMeterCharges}/-*`;
   const maintenanceLine = `${maintenanceLabel} - *${maintenanceCharges}/-*`;
+
+  // Dynamic custom fee columns (e.g. Building Charge - *200/-*)
+  const customLines: string[] = [];
+  const processedKeys = new Set<string>();
+
+  customColumns.forEach((col) => {
+    const amt = customCharges[col.id] ?? customCharges[col.name] ?? col.defaultAmount ?? 0;
+    customLines.push(`${col.name} - *${amt}/-*`);
+    processedKeys.add(col.id);
+    processedKeys.add(col.name);
+  });
+
+  // Any other custom charges not in customColumns
+  Object.entries(customCharges).forEach(([key, val]) => {
+    if (!processedKeys.has(key) && val !== undefined && val !== null) {
+      customLines.push(`${key} - *${val}/-*`);
+    }
+  });
+
+  const customFeeBlock = customLines.length > 0 ? `\n${customLines.join('\n')}` : '';
 
   const previousBalanceLine =
     previousBalance > 0
@@ -268,7 +314,7 @@ Current reading - *${currentReading}*
 Total unit - *${unitsConsumed}*
 Amount - *${calculatedAmount}/-*
 ${commonMeterLine}
-${maintenanceLine}${previousBalanceLine ? `\n${previousBalanceLine}` : ''}
+${maintenanceLine}${customFeeBlock}${previousBalanceLine ? `\n${previousBalanceLine}` : ''}
 ${finalTotalLine}`;
 }
 

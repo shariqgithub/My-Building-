@@ -20,6 +20,19 @@
     <meta property="og:description" content="Mobile-first electricity bill and building expenditure tracking app for buildings with 15 flats sharing one common meter, supporting secure PIN login, monthly expenditure logging, net savings vs out-of-pocket accounting, custom flat rates, UPI payments, and admin reading management." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('bijli_theme_preference');
+          var isDark = saved === 'dark' || (!saved && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (isDark) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

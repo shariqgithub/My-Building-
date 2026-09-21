@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useBuilding } from '../context/BuildingContext';
 import { EditBuildingModal } from './EditBuildingModal';
 import {
@@ -15,6 +15,8 @@ import {
   Edit3,
   ArrowRightLeft,
   Lock,
+  Sun,
+  Moon,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -52,6 +54,35 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [showNotifs, setShowNotifs] = useState(false);
   const [showRoleMenu, setShowRoleMenu] = useState(false);
   const [showEditBuildingModal, setShowEditBuildingModal] = useState(false);
+
+  // Theme Toggle: Light / Dark Mode
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    try {
+      const saved = localStorage.getItem('bijli_theme_preference');
+      if (saved === 'dark' || saved === 'light') return saved;
+      return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light';
+    } catch {
+      return 'light';
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (theme === 'dark') {
+        document.documentElement.classList.add('dark');
+        localStorage.setItem('bijli_theme_preference', 'dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+        localStorage.setItem('bijli_theme_preference', 'light');
+      }
+    } catch {}
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
 
   const requestPushPermission = async () => {
     if ('Notification' in window) {
@@ -261,6 +292,22 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           )}
 
+          {/* Theme Toggle Button (Light/Dark Mode) */}
+          <button
+            type="button"
+            onClick={toggleTheme}
+            id="theme-toggle-btn"
+            className="p-1.5 sm:p-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-transparent hover:border-slate-200 transition-colors cursor-pointer"
+            title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            aria-label="Toggle light/dark theme"
+          >
+            {theme === 'dark' ? (
+              <Sun className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-amber-400 hover:rotate-45 transition-transform duration-200" />
+            ) : (
+              <Moon className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-slate-600 hover:-rotate-12 transition-transform duration-200" />
+            )}
+          </button>
+
           {/* Manual Lock Screen Button */}
           {currentSession && (
             isAppLocked ? (
@@ -403,9 +450,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                         <div>
                           <div className="text-xs font-bold text-indigo-900 flex items-center gap-1.5">
                             <Shield className="w-3.5 h-3.5 text-indigo-600" />
-                            Society Admin (Secretary)
+                            Mohammad Shariq Ansari
                           </div>
-                          <div className="text-[10px] text-slate-500">Full Building Management Access</div>
+                          <div className="text-[10px] text-slate-500">Society Secretary & Admin • +91 8077649394</div>
                         </div>
                       </div>
 

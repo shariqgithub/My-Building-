@@ -20,6 +20,12 @@ export interface MainMeterBillInput {
   commonAreaRule: 'divide_by_flat_units' | 'split_loss_equally' | 'none';
 }
 
+export interface CustomFeeColumn {
+  id: string; // unique identifier, e.g. "col-building-charge" or "fee_1726918291"
+  name: string; // e.g. "Building Charge" or "Lift Maintenance"
+  defaultAmount: number; // e.g. 200 (default ₹ amount per flat)
+}
+
 export interface FlatReadingEntry {
   flatId: string;
   flatNumber: string;
@@ -33,7 +39,8 @@ export interface FlatReadingEntry {
   maintenanceLabel?: string; // e.g. "Cleaning" or "Maintenance"
   commonMeterCharges?: number; // Common meter/area charges (e.g. Water & stairs light ₹160)
   commonMeterLabel?: string; // e.g. "Water & stairs light" or "Common area"
-  totalBillAmount: number; // calculatedAmount + maintenanceCharges + commonMeterCharges
+  customCharges?: Record<string, number>; // Dynamic fee charges e.g. { "col-building-charge": 200 }
+  totalBillAmount: number; // calculatedAmount + maintenanceCharges + commonMeterCharges + sum(customCharges)
   previousBalance?: number; // Previous month unpaid dues (+ve) or advance credit (-ve)
   netPayableAmount?: number; // totalBillAmount + (previousBalance || 0)
   paymentStatus: 'paid' | 'unpaid' | 'pending' | 'partially_paid';
@@ -60,6 +67,7 @@ export interface BillingCycle {
   totalBilledAmount: number;
   totalCollectedAmount: number;
   isLocked: boolean; // whether month is finalized
+  customColumns?: CustomFeeColumn[]; // Dynamic fee columns e.g. [{ id: "col-1", name: "Building Charge", defaultAmount: 200 }]
 }
 
 export interface BuildingSettings {
@@ -73,12 +81,14 @@ export interface BuildingSettings {
   defaultMaintenanceLabel: string; // e.g. "Cleaning"
   defaultCommonMeterCharges: number; // e.g. 160 (Water & stairs light)
   defaultCommonMeterLabel: string; // e.g. "Water & stairs light"
+  customFeeColumns?: CustomFeeColumn[]; // Preserved default custom fee columns
   societyUpiId: string; // e.g. "buildingadmin@okaxis"
   societyPayeeName: string; // e.g. "Green Heights Co-op Society"
   upiQrCodeUrl?: string; // Custom uploaded UPI QR code image data URL
+  adminName?: string; // e.g. "Mohammad Shariq Ansari"
   adminPin: string; // e.g. "1234" (backup PIN)
-  adminPhone: string; // e.g. "9876543210"
-  adminEmail?: string; // e.g. "secretary@society.com"
+  adminPhone: string; // e.g. "8077649394"
+  adminEmail?: string; // e.g. "shariqalig881@gmail.com"
   adminPassword?: string; // Fixed secure password e.g. "My1Build2@3"
   adminFlatId?: string; // e.g. "flat-101" - Flat belonging to the admin/secretary
 }

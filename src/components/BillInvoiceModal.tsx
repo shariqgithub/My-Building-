@@ -50,6 +50,8 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
       commonMeterLabel: reading.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light',
       maintenanceCharges: reading.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110,
       maintenanceLabel: reading.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning',
+      customColumns: cycle.customColumns,
+      customCharges: reading.customCharges,
       totalBillAmount: reading.totalBillAmount,
       previousBalance: reading.previousBalance,
       netPayableAmount: reading.netPayableAmount,
@@ -199,6 +201,34 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
               <span>{reading.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning'}</span>
               <span className="font-semibold">₹{(reading.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110).toLocaleString('en-IN')}/-</span>
             </div>
+
+            {/* Custom Fee Columns */}
+            {cycle.customColumns && cycle.customColumns.length > 0 &&
+              cycle.customColumns.map((col) => {
+                const amount =
+                  reading.customCharges?.[col.id] ??
+                  reading.customCharges?.[col.name] ??
+                  col.defaultAmount ??
+                  0;
+                return (
+                  <div key={col.id} className="flex justify-between text-slate-700 text-xs">
+                    <span>{col.name}</span>
+                    <span className="font-semibold">₹{Number(amount).toLocaleString('en-IN')}/-</span>
+                  </div>
+                );
+              })}
+
+            {/* Additional Custom Charges */}
+            {reading.customCharges &&
+              Object.entries(reading.customCharges).map(([key, val]) => {
+                if (cycle.customColumns?.some((c) => c.id === key || c.name === key)) return null;
+                return (
+                  <div key={key} className="flex justify-between text-slate-700 text-xs">
+                    <span>{key}</span>
+                    <span className="font-semibold">₹{Number(val).toLocaleString('en-IN')}/-</span>
+                  </div>
+                );
+              })}
 
             <div className="border-t border-amber-200/80 pt-1.5 flex justify-between text-slate-800">
               <span>Current Month Total Bill:</span>

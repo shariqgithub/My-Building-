@@ -10,6 +10,7 @@ import {
   UserSession,
   BuildingExpense,
   SocietyBroadcast,
+  CustomFeeColumn,
 } from '../types';
 import {
   INITIAL_SETTINGS,
@@ -65,7 +66,29 @@ interface BuildingContextType {
     mainMeterUnits?: number;
     mainMeterBillAmount?: number;
   }) => BillingCycle;
-  updateCycleReadings: (cycleId: string, readings: BillingCycle['readings'], mainMeter?: BillingCycle['mainMeter']) => void;
+  updateCycleReadings: (
+    cycleId: string,
+    readings: BillingCycle['readings'],
+    mainMeter?: BillingCycle['mainMeter'],
+    customColumns?: CustomFeeColumn[]
+  ) => void;
+  addCustomFeeColumn: (
+    column: { name: string; defaultAmount: number },
+    applyToAllFlats?: boolean,
+    cycleId?: string
+  ) => void;
+  removeCustomFeeColumn: (columnId: string, cycleId?: string) => void;
+  updateCustomFeeColumn: (
+    columnId: string,
+    updates: { name?: string; defaultAmount?: number },
+    cycleId?: string
+  ) => void;
+  updateFlatCustomCharge: (
+    cycleId: string,
+    flatId: string,
+    columnId: string,
+    amount: number
+  ) => void;
   addExpense: (expense: Omit<BuildingExpense, 'id' | 'createdAt'>) => void;
   updateExpense: (id: string, updates: Partial<BuildingExpense>) => void;
   deleteExpense: (id: string) => void;
@@ -73,6 +96,9 @@ interface BuildingContextType {
   updateBroadcast: (id: string, updates: Partial<SocietyBroadcast>) => void;
   deleteBroadcast: (id: string) => void;
   setMonthlyManualCollection: (monthKey: string, amount: number | undefined) => void;
+  resetMonthPaymentData: (cycleId: string) => Promise<boolean>;
+  resetAllPaymentsData: () => Promise<boolean>;
+  removeMonthCycle: (cycleId: string) => Promise<boolean>;
   markPaymentStatus: (
     cycleId: string,
     flatId: string,
@@ -136,11 +162,17 @@ export function syncCycleBalances(allCycles: BillingCycle[]): BillingCycle[] {
     let totalCollected = 0;
 
     const updatedReadings = cycle.readings.map((r) => {
-      // 1. Calculate current month bill (energy + common + maintenance)
+      // 1. Calculate current month bill (energy + common + maintenance + custom charges)
       const energy = r.calculatedAmount ?? (r.unitsConsumed * r.ratePerUnit);
       const common = r.commonMeterCharges ?? 160;
       const maint = r.maintenanceCharges ?? 110;
-      const currentMonthBill = energy + common + maint;
+      let customSum = 0;
+      if (r.customCharges) {
+        Object.values(r.customCharges).forEach((val) => {
+          customSum += Number(val) || 0;
+        });
+      }
+      const currentMonthBill = energy + common + maint + customSum;
 
       // 2. Previous balance carried forward from preceding cycle
       const carriedBalance = cycleIndex === 0 ? (r.previousBalance ?? 0) : (flatCumulativeBalance.get(r.flatId) ?? 0);
@@ -228,6 +260,9 @@ const STORAGE_KEYS = {
 // Auto-lock after 10 minutes of inactivity
 const AUTO_LOCK_TIMEOUT_MS = 10 * 60 * 1000;
 
+export const FIXED_ADMIN_NAME = 'Mohammad Shariq Ansari';
+export const FIXED_ADMIN_PHONE = '8077649394';
+
 const BuildingContext = createContext<BuildingContextType | undefined>(undefined);
 
 export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -236,9 +271,16 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
       if (saved) {
         const parsed = JSON.parse(saved);
+        const resolvedPhone = (!parsed.adminPhone || parsed.adminPhone === '9876543210')
+          ? FIXED_ADMIN_PHONE
+          : parsed.adminPhone;
+        const resolvedName = parsed.adminName || FIXED_ADMIN_NAME;
+
         return {
           ...INITIAL_SETTINGS,
           ...parsed,
+          adminName: resolvedName,
+          adminPhone: resolvedPhone,
           upiQrCodeUrl: parsed.upiQrCodeUrl || undefined,
           defaultCommonMeterCharges: parsed.defaultCommonMeterCharges ?? 160,
           defaultCommonMeterLabel: parsed.defaultCommonMeterLabel || 'Water & stairs light',
@@ -272,22 +314,73 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const [cycles, setCycles] = useState<BillingCycle[]>(() => {
     try {
+      const resetDone = localStorage.getItem('bijli_start_august_only_v6');
       const saved = localStorage.getItem(STORAGE_KEYS.CYCLES);
-      if (saved) {
+
+      const isDeletedMonth = (c: BillingCycle) => {
+        const m = (c.month || '').toLowerCase();
+        const key = c.monthKey || '';
+        const cid = c.id || '';
+        const isSep = key === '2026-09' || m.includes('september') || cid.includes('2026-09');
+        const isOct = key === '2026-10' || m.includes('october') || cid.includes('2026-10');
+        return isSep || isOct;
+      };
+
+      if (saved && resetDone) {
         const parsed = JSON.parse(saved) as BillingCycle[];
-        const mapped = parsed.map((c) => ({
+        const filtered = parsed.filter((c) => !isDeletedMonth(c));
+        if (filtered.length > 0) {
+          const mapped = filtered.map((c) => ({
+            ...c,
+            readings: c.readings.map((r) => ({
+              ...r,
+              commonMeterCharges: r.commonMeterCharges ?? 160,
+              commonMeterLabel: r.commonMeterLabel || 'Water & stairs light',
+              maintenanceCharges: r.maintenanceCharges ?? 110,
+              maintenanceLabel: r.maintenanceLabel || 'Cleaning',
+            })),
+          }));
+          return syncCycleBalances(mapped);
+        }
+        return syncCycleBalances(INITIAL_CYCLES);
+      } else {
+        // User request: "Now I need to start only from August, september and October I need to delete"
+        localStorage.setItem('bijli_start_august_only_v6', 'true');
+        let baseCycles = INITIAL_CYCLES;
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved) as BillingCycle[];
+            const filtered = parsed.filter((c) => !isDeletedMonth(c));
+            if (filtered.length > 0) {
+              baseCycles = filtered;
+            }
+          } catch {}
+        }
+
+        const resetCycles = baseCycles.map((c) => ({
           ...c,
+          totalCollectedAmount: 0,
+          isLocked: false,
           readings: c.readings.map((r) => ({
             ...r,
-            commonMeterCharges: r.commonMeterCharges ?? 160,
-            commonMeterLabel: r.commonMeterLabel || 'Water & stairs light',
-            maintenanceCharges: r.maintenanceCharges ?? 110,
-            maintenanceLabel: r.maintenanceLabel || 'Cleaning',
+            paymentStatus: 'unpaid' as const,
+            paidAmount: undefined,
+            paidDate: undefined,
+            paymentMethod: undefined,
+            upiReference: undefined,
+            advancePaid: 0,
+            adminNotes: undefined,
+            remainingBalance: r.netPayableAmount ?? r.totalBillAmount,
           })),
         }));
-        return syncCycleBalances(mapped);
+
+        const synced = syncCycleBalances(resetCycles);
+        try {
+          localStorage.setItem(STORAGE_KEYS.CYCLES, JSON.stringify(synced));
+          localStorage.removeItem(STORAGE_KEYS.MANUAL_COLLECTIONS);
+        } catch {}
+        return synced;
       }
-      return syncCycleBalances(INITIAL_CYCLES);
     } catch {
       return syncCycleBalances(INITIAL_CYCLES);
     }
@@ -296,9 +389,18 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [activeCycleId, setActiveCycleId] = useState<string>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.ACTIVE_CYCLE_ID);
-      return saved || (INITIAL_CYCLES[0] ? INITIAL_CYCLES[0].id : '');
+      const isSavedInvalid = saved && (
+        saved.includes('2026-09') ||
+        saved.includes('2026-10') ||
+        saved.toLowerCase().includes('september') ||
+        saved.toLowerCase().includes('october')
+      );
+      if (saved && !isSavedInvalid) {
+        return saved;
+      }
+      return INITIAL_CYCLES[0] ? INITIAL_CYCLES[0].id : 'cycle-2026-08';
     } catch {
-      return INITIAL_CYCLES[0] ? INITIAL_CYCLES[0].id : '';
+      return INITIAL_CYCLES[0] ? INITIAL_CYCLES[0].id : 'cycle-2026-08';
     }
   });
 
@@ -314,7 +416,16 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [expenses, setExpenses] = useState<BuildingExpense[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.EXPENSES);
-      return saved ? JSON.parse(saved) : INITIAL_EXPENSES;
+      const list = saved ? JSON.parse(saved) : INITIAL_EXPENSES;
+      // Filter out September and October expenses as requested
+      return (list as BuildingExpense[]).filter((e) => {
+        const cid = e.cycleId || '';
+        const mkey = e.monthKey || '';
+        const d = e.date || '';
+        const isSep = cid.includes('2026-09') || mkey === '2026-09' || d.startsWith('2026-09');
+        const isOct = cid.includes('2026-10') || mkey === '2026-10' || d.startsWith('2026-10');
+        return !isSep && !isOct;
+      });
     } catch {
       return INITIAL_EXPENSES;
     }
@@ -345,6 +456,13 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && (parsed.isPhoneVerified || parsed.role)) {
+          if (parsed.role === 'admin') {
+            return {
+              ...parsed,
+              name: FIXED_ADMIN_NAME,
+              phone: FIXED_ADMIN_PHONE,
+            };
+          }
           return parsed;
         }
       }
@@ -437,13 +555,31 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               setFlats(data.flats);
             }
             if (Array.isArray(data.cycles) && data.cycles.length > 0) {
-              setCycles(syncCycleBalances(data.cycles));
+              const filteredCycles = data.cycles.filter((c: BillingCycle) => {
+                const m = (c.month || '').toLowerCase();
+                const key = c.monthKey || '';
+                const cid = c.id || '';
+                const isSep = key === '2026-09' || m.includes('september') || cid.includes('2026-09');
+                const isOct = key === '2026-10' || m.includes('october') || cid.includes('2026-10');
+                return !isSep && !isOct;
+              });
+              setCycles(syncCycleBalances(filteredCycles.length > 0 ? filteredCycles : INITIAL_CYCLES));
             }
             if (data.activeCycleId) {
-              setActiveCycleId(data.activeCycleId);
+              const aid = data.activeCycleId;
+              const isInvalid = aid.includes('2026-09') || aid.includes('2026-10') || aid.toLowerCase().includes('september') || aid.toLowerCase().includes('october');
+              setActiveCycleId(isInvalid ? (INITIAL_CYCLES[0]?.id || 'cycle-2026-08') : aid);
             }
             if (Array.isArray(data.expenses)) {
-              setExpenses(data.expenses);
+              const filteredExpenses = data.expenses.filter((e: BuildingExpense) => {
+                const cid = e.cycleId || '';
+                const mkey = e.monthKey || '';
+                const d = e.date || '';
+                const isSep = cid.includes('2026-09') || mkey === '2026-09' || d.startsWith('2026-09');
+                const isOct = cid.includes('2026-10') || mkey === '2026-10' || d.startsWith('2026-10');
+                return !isSep && !isOct;
+              });
+              setExpenses(filteredExpenses);
             }
             if (Array.isArray(data.broadcasts)) {
               setBroadcasts(data.broadcasts);
@@ -803,7 +939,13 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 : (r.maintenanceLabel || 'Cleaning');
 
             const energy = r.calculatedAmount ?? (r.unitsConsumed * r.ratePerUnit);
-            const newTotal = energy + commonCharges + maintCharges + (r.lateFee || 0);
+            let customSum = 0;
+            if (r.customCharges) {
+              Object.values(r.customCharges).forEach((val) => {
+                customSum += Number(val) || 0;
+              });
+            }
+            const newTotal = energy + commonCharges + maintCharges + customSum + (r.lateFee || 0);
 
             return {
               ...r,
@@ -877,7 +1019,13 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 : (r.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning');
 
             const energy = r.calculatedAmount ?? (r.unitsConsumed * r.ratePerUnit);
-            const newTotal = energy + commonCharges + maintCharges + (r.lateFee || 0);
+            let customSum = 0;
+            if (r.customCharges) {
+              Object.values(r.customCharges).forEach((val) => {
+                customSum += Number(val) || 0;
+              });
+            }
+            const newTotal = energy + commonCharges + maintCharges + customSum + (r.lateFee || 0);
 
             return {
               ...r,
@@ -928,6 +1076,201 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         })),
       }))
     );
+  };
+
+  const addCustomFeeColumn = (
+    column: { name: string; defaultAmount: number },
+    applyToAllFlats: boolean = true,
+    cycleId?: string
+  ) => {
+    const colName = column.name.trim();
+    if (!colName) return;
+    const colId = `col_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const newCol: CustomFeeColumn = {
+      id: colId,
+      name: colName,
+      defaultAmount: Number(column.defaultAmount) || 0,
+    };
+
+    // Update settings so future cycles retain this column
+    setSettings((prev) => {
+      const existing = prev.customFeeColumns || [];
+      const updatedCols = [...existing, newCol];
+      saveToCloud({ ...prev, customFeeColumns: updatedCols });
+      return { ...prev, customFeeColumns: updatedCols };
+    });
+
+    const targetCycleId = cycleId || activeCycleId;
+    let finalUpdatedCycles: BillingCycle[] = [];
+
+    setCycles((prev) => {
+      const updated = prev.map((c) => {
+        if (c.id !== targetCycleId) return c;
+        const existingColumns = c.customColumns || [];
+        const nextCustomColumns = [...existingColumns, newCol];
+
+        const updatedReadings = c.readings.map((r) => {
+          const currentCharges = { ...(r.customCharges || {}) };
+          if (applyToAllFlats) {
+            currentCharges[colId] = newCol.defaultAmount;
+          }
+          return {
+            ...r,
+            customCharges: currentCharges,
+          };
+        });
+
+        return {
+          ...c,
+          customColumns: nextCustomColumns,
+          readings: updatedReadings,
+        };
+      });
+
+      finalUpdatedCycles = syncCycleBalances(updated);
+      return finalUpdatedCycles;
+    });
+
+    if (finalUpdatedCycles.length > 0) {
+      saveToCloud(undefined, undefined, finalUpdatedCycles);
+    }
+
+    addNotification(
+      'Fee Column Added',
+      `Added "${newCol.name}" (₹${newCol.defaultAmount}/flat) to the billing table. Receipts and totals auto-updated!`,
+      'system'
+    );
+  };
+
+  const removeCustomFeeColumn = (columnId: string, cycleId?: string) => {
+    setSettings((prev) => {
+      const updatedCols = (prev.customFeeColumns || []).filter((col) => col.id !== columnId);
+      saveToCloud({ ...prev, customFeeColumns: updatedCols });
+      return { ...prev, customFeeColumns: updatedCols };
+    });
+
+    const targetCycleId = cycleId || activeCycleId;
+    let finalUpdatedCycles: BillingCycle[] = [];
+
+    setCycles((prev) => {
+      const updated = prev.map((c) => {
+        if (c.id !== targetCycleId) return c;
+        const nextCustomColumns = (c.customColumns || []).filter((col) => col.id !== columnId);
+
+        const updatedReadings = c.readings.map((r) => {
+          const currentCharges = { ...(r.customCharges || {}) };
+          delete currentCharges[columnId];
+          return {
+            ...r,
+            customCharges: currentCharges,
+          };
+        });
+
+        return {
+          ...c,
+          customColumns: nextCustomColumns,
+          readings: updatedReadings,
+        };
+      });
+
+      finalUpdatedCycles = syncCycleBalances(updated);
+      return finalUpdatedCycles;
+    });
+
+    if (finalUpdatedCycles.length > 0) {
+      saveToCloud(undefined, undefined, finalUpdatedCycles);
+    }
+
+    addNotification(
+      'Fee Column Removed',
+      `Removed fee column from billing table. Receipts and totals auto-updated!`,
+      'system'
+    );
+  };
+
+  const updateCustomFeeColumn = (
+    columnId: string,
+    updates: { name?: string; defaultAmount?: number },
+    cycleId?: string
+  ) => {
+    setSettings((prev) => {
+      const updatedCols = (prev.customFeeColumns || []).map((col) =>
+        col.id === columnId
+          ? {
+              ...col,
+              name: updates.name !== undefined ? updates.name.trim() : col.name,
+              defaultAmount: updates.defaultAmount !== undefined ? Number(updates.defaultAmount) : col.defaultAmount,
+            }
+          : col
+      );
+      saveToCloud({ ...prev, customFeeColumns: updatedCols });
+      return { ...prev, customFeeColumns: updatedCols };
+    });
+
+    const targetCycleId = cycleId || activeCycleId;
+    let finalUpdatedCycles: BillingCycle[] = [];
+
+    setCycles((prev) => {
+      const updated = prev.map((c) => {
+        if (c.id !== targetCycleId) return c;
+        const nextCustomColumns = (c.customColumns || []).map((col) =>
+          col.id === columnId
+            ? {
+                ...col,
+                name: updates.name !== undefined ? updates.name.trim() : col.name,
+                defaultAmount: updates.defaultAmount !== undefined ? Number(updates.defaultAmount) : col.defaultAmount,
+              }
+            : col
+        );
+        return {
+          ...c,
+          customColumns: nextCustomColumns,
+        };
+      });
+
+      finalUpdatedCycles = syncCycleBalances(updated);
+      return finalUpdatedCycles;
+    });
+
+    if (finalUpdatedCycles.length > 0) {
+      saveToCloud(undefined, undefined, finalUpdatedCycles);
+    }
+  };
+
+  const updateFlatCustomCharge = (
+    cycleId: string,
+    flatId: string,
+    columnId: string,
+    amount: number
+  ) => {
+    let finalUpdatedCycles: BillingCycle[] = [];
+
+    setCycles((prev) => {
+      const updated = prev.map((c) => {
+        if (c.id !== cycleId) return c;
+        const updatedReadings = c.readings.map((r) => {
+          if (r.flatId !== flatId) return r;
+          const currentCharges = { ...(r.customCharges || {}) };
+          currentCharges[columnId] = Number(amount) || 0;
+          return {
+            ...r,
+            customCharges: currentCharges,
+          };
+        });
+
+        return {
+          ...c,
+          readings: updatedReadings,
+        };
+      });
+
+      finalUpdatedCycles = syncCycleBalances(updated);
+      return finalUpdatedCycles;
+    });
+
+    if (finalUpdatedCycles.length > 0) {
+      saveToCloud(undefined, undefined, finalUpdatedCycles);
+    }
   };
 
   const updateFlat = (flatId: string, updates: Partial<FlatInfo>) => {
@@ -987,7 +1330,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     mainMeterBillAmount?: number;
   }): BillingCycle => {
     // Determine next month based on activeCycle
-    const currentMonthKey = activeCycle?.monthKey || '2026-09';
+    const currentMonthKey = activeCycle?.monthKey || '2026-08';
     const [yearStr, monthStr] = currentMonthKey.split('-');
     let year = parseInt(yearStr, 10);
     let monthNum = parseInt(monthStr, 10) + 1;
@@ -1011,10 +1354,12 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       });
     }
 
-    const defaultMainUnits = params?.mainMeterUnits || activeCycle?.mainMeter.mainMeterUnits || 2000;
-    const defaultMainBill = params?.mainMeterBillAmount || activeCycle?.mainMeter.mainMeterBillAmount || 16000;
-    const defaultPrevMain = activeCycle?.mainMeter.mainMeterCurrentReading || 50000;
+    const defaultMainUnits = params?.mainMeterUnits || activeCycle?.mainMeter.mainMeterUnits || 1900;
+    const defaultMainBill = params?.mainMeterBillAmount || activeCycle?.mainMeter.mainMeterBillAmount || 15200;
+    const defaultPrevMain = activeCycle?.mainMeter.mainMeterCurrentReading || 48000;
     const defaultCurrMain = defaultPrevMain + defaultMainUnits;
+
+    const cycleCustomColumns: CustomFeeColumn[] = activeCycle?.customColumns || settings.customFeeColumns || [];
 
     // Create preliminary flat readings
     const newReadings: FlatReadingEntry[] = flats.map((f) => {
@@ -1028,7 +1373,16 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const energy = units * rate;
       const common = settings.defaultCommonMeterCharges ?? 160;
       const maint = settings.defaultMaintenanceCharges ?? 110;
-      const total = energy + common + maint;
+
+      const customCharges: Record<string, number> = {};
+      let customSum = 0;
+      cycleCustomColumns.forEach((col) => {
+        const amt = col.defaultAmount ?? 0;
+        customCharges[col.id] = amt;
+        customSum += amt;
+      });
+
+      const total = energy + common + maint + customSum;
 
       return {
         flatId: f.id,
@@ -1043,6 +1397,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         maintenanceLabel: settings.defaultMaintenanceLabel || 'Cleaning',
         commonMeterCharges: common,
         commonMeterLabel: settings.defaultCommonMeterLabel || 'Water & stairs light',
+        customCharges,
         totalBillAmount: total,
         paymentStatus: 'unpaid',
       };
@@ -1068,6 +1423,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       totalCollectedAmount: 0,
       isLocked: false,
       readings: newReadings,
+      customColumns: cycleCustomColumns,
     };
 
     setCycles((prev) => {
@@ -1089,7 +1445,8 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const updateCycleReadings = (
     cycleId: string,
     readings: BillingCycle['readings'],
-    mainMeter?: BillingCycle['mainMeter']
+    mainMeter?: BillingCycle['mainMeter'],
+    customColumns?: CustomFeeColumn[]
   ) => {
     let finalUpdatedCycles: BillingCycle[] = [];
     setCycles((prev) => {
@@ -1104,6 +1461,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           ...c,
           readings,
           mainMeter: mainMeter || c.mainMeter,
+          customColumns: customColumns !== undefined ? customColumns : c.customColumns,
           totalSubMeterUnits: totalUnits,
           totalBilledAmount: totalBilled,
           totalCollectedAmount: totalCollected,
@@ -1194,6 +1552,113 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     );
   };
 
+  const resetMonthPaymentData = async (cycleId: string): Promise<boolean> => {
+    let finalUpdatedCycles: BillingCycle[] = [];
+    const targetCycle = cycles.find((c) => c.id === cycleId);
+    const targetMonthKey = targetCycle?.monthKey;
+
+    setCycles((prev) => {
+      const updated = prev.map((c) => {
+        if (c.id !== cycleId) return c;
+        const updatedReadings = c.readings.map((r) => ({
+          ...r,
+          paymentStatus: 'unpaid' as const,
+          paidAmount: undefined,
+          paidDate: undefined,
+          paymentMethod: undefined,
+          upiReference: undefined,
+          advancePaid: 0,
+          remainingBalance: r.netPayableAmount ?? r.totalBillAmount,
+          adminNotes: undefined,
+        }));
+        return {
+          ...c,
+          totalCollectedAmount: 0,
+          readings: updatedReadings,
+        };
+      });
+      finalUpdatedCycles = syncCycleBalances(updated);
+      return finalUpdatedCycles;
+    });
+
+    let updatedManualCollections = { ...monthlyManualCollections };
+    if (targetMonthKey && updatedManualCollections[targetMonthKey] !== undefined) {
+      delete updatedManualCollections[targetMonthKey];
+      setMonthlyManualCollections(updatedManualCollections);
+      try {
+        localStorage.setItem(STORAGE_KEYS.MANUAL_COLLECTIONS, JSON.stringify(updatedManualCollections));
+      } catch {}
+    }
+
+    try {
+      localStorage.setItem(STORAGE_KEYS.CYCLES, JSON.stringify(finalUpdatedCycles));
+    } catch {}
+
+    return await saveToCloud(
+      undefined,
+      undefined,
+      finalUpdatedCycles,
+      undefined,
+      undefined,
+      updatedManualCollections
+    );
+  };
+
+  const resetAllPaymentsData = async (): Promise<boolean> => {
+    let finalUpdatedCycles: BillingCycle[] = [];
+    setCycles((prev) => {
+      const updated = prev.map((c) => ({
+        ...c,
+        totalCollectedAmount: 0,
+        readings: c.readings.map((r) => ({
+          ...r,
+          paymentStatus: 'unpaid' as const,
+          paidAmount: undefined,
+          paidDate: undefined,
+          paymentMethod: undefined,
+          upiReference: undefined,
+          advancePaid: 0,
+          remainingBalance: r.netPayableAmount ?? r.totalBillAmount,
+          adminNotes: undefined,
+        })),
+      }));
+      finalUpdatedCycles = syncCycleBalances(updated);
+      return finalUpdatedCycles;
+    });
+
+    setMonthlyManualCollections({});
+    try {
+      localStorage.setItem(STORAGE_KEYS.CYCLES, JSON.stringify(finalUpdatedCycles));
+      localStorage.removeItem(STORAGE_KEYS.MANUAL_COLLECTIONS);
+    } catch {}
+
+    return await saveToCloud(
+      undefined,
+      undefined,
+      finalUpdatedCycles,
+      undefined,
+      undefined,
+      {}
+    );
+  };
+
+  const removeMonthCycle = async (cycleId: string): Promise<boolean> => {
+    const remainingCycles = cycles.filter((c) => c.id !== cycleId && c.monthKey !== cycleId);
+    const synced = syncCycleBalances(remainingCycles);
+    setCycles(synced);
+    if (activeCycleId === cycleId) {
+      const fallbackId = synced[0]?.id || '';
+      setActiveCycleId(fallbackId);
+      try {
+        localStorage.setItem(STORAGE_KEYS.ACTIVE_CYCLE_ID, fallbackId);
+      } catch {}
+    }
+    try {
+      localStorage.setItem(STORAGE_KEYS.CYCLES, JSON.stringify(synced));
+    } catch {}
+    return await saveToCloud(undefined, undefined, synced);
+  };
+
   const checkPhoneRegistration = (phone: string) => {
     const rawClean = phone.replace(/\D/g, '');
     const tenDigit = rawClean.length > 10 ? rawClean.slice(-10) : rawClean;
@@ -1206,11 +1671,12 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       };
     }
 
-    const adminCleanPhone = (settings.adminPhone || INITIAL_SETTINGS.adminPhone || '').replace(/\D/g, '');
+    const adminCleanPhone = (settings.adminPhone || FIXED_ADMIN_PHONE).replace(/\D/g, '');
     const adminTen = adminCleanPhone.length > 10 ? adminCleanPhone.slice(-10) : adminCleanPhone;
     const isSecretary = Boolean(
-      adminTen &&
-      (tenDigit === adminTen || rawClean === adminCleanPhone)
+      tenDigit === FIXED_ADMIN_PHONE ||
+      rawClean === FIXED_ADMIN_PHONE ||
+      (adminTen && (tenDigit === adminTen || rawClean === adminCleanPhone))
     );
 
     if (isSecretary) {
@@ -1270,16 +1736,16 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const trimmedPin = pin?.trim() || '';
 
     // Check Secretary
-    const adminCleanPhone = (settings.adminPhone || INITIAL_SETTINGS.adminPhone || '').replace(/\D/g, '');
+    const adminCleanPhone = (settings.adminPhone || FIXED_ADMIN_PHONE).replace(/\D/g, '');
     const adminTen = adminCleanPhone.length > 10 ? adminCleanPhone.slice(-10) : adminCleanPhone;
-    if (adminTen && (tenDigit === adminTen || rawClean === adminCleanPhone)) {
+    if (tenDigit === FIXED_ADMIN_PHONE || rawClean === FIXED_ADMIN_PHONE || (adminTen && (tenDigit === adminTen || rawClean === adminCleanPhone))) {
       const configuredPin = settings.adminPin?.trim() || INITIAL_SETTINGS.adminPin?.trim() || '1234';
       const configuredPwd = settings.adminPassword || INITIAL_SETTINGS.adminPassword || 'My1Build2@3';
       if (trimmedPin === configuredPin || trimmedPin === configuredPwd) {
         const session: UserSession = {
           role: 'admin',
-          name: 'Society Secretary',
-          phone: settings.adminPhone || tenDigit,
+          name: FIXED_ADMIN_NAME,
+          phone: FIXED_ADMIN_PHONE,
           email: settings.adminEmail || INITIAL_SETTINGS.adminEmail,
           flatId: settings.adminFlatId || 'flat-101',
           isCommitteeMember: true,
@@ -1335,19 +1801,21 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const loginAsResident = (phone: string) => {
     const cleanPhone = phone.replace(/\D/g, '');
-    const adminCleanPhone = (settings.adminPhone || INITIAL_SETTINGS.adminPhone || '').replace(/\D/g, '');
+    const adminCleanPhone = (settings.adminPhone || FIXED_ADMIN_PHONE).replace(/\D/g, '');
 
     // Check if phone matches society secretary/admin
     if (
-      adminCleanPhone &&
-      (cleanPhone === adminCleanPhone ||
-        cleanPhone.endsWith(adminCleanPhone) ||
-        adminCleanPhone.endsWith(cleanPhone))
+      cleanPhone === FIXED_ADMIN_PHONE ||
+      cleanPhone.endsWith(FIXED_ADMIN_PHONE) ||
+      (adminCleanPhone &&
+        (cleanPhone === adminCleanPhone ||
+          cleanPhone.endsWith(adminCleanPhone) ||
+          adminCleanPhone.endsWith(cleanPhone)))
     ) {
       const session: UserSession = {
         role: 'admin',
-        name: 'Society Secretary',
-        phone: settings.adminPhone || cleanPhone,
+        name: FIXED_ADMIN_NAME,
+        phone: FIXED_ADMIN_PHONE,
         email: settings.adminEmail || INITIAL_SETTINGS.adminEmail,
         flatId: settings.adminFlatId || 'flat-101',
         isCommitteeMember: true,
@@ -1409,8 +1877,8 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (trimmed && (trimmed === configuredPin || trimmed === configuredPwd)) {
       const session: UserSession = {
         role: 'admin',
-        name: 'Society Secretary',
-        phone: settings.adminPhone || INITIAL_SETTINGS.adminPhone,
+        name: FIXED_ADMIN_NAME,
+        phone: FIXED_ADMIN_PHONE,
         email: settings.adminEmail || INITIAL_SETTINGS.adminEmail,
         flatId: settings.adminFlatId || INITIAL_SETTINGS.adminFlatId || 'flat-101',
         isCommitteeMember: true,
@@ -1432,7 +1900,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     const cleanId = rawId.toLowerCase();
     const cleanPhone = rawId.replace(/\D/g, '');
-    const adminPhoneClean = (settings.adminPhone || INITIAL_SETTINGS.adminPhone || '').replace(/\D/g, '');
+    const adminPhoneClean = (settings.adminPhone || FIXED_ADMIN_PHONE).replace(/\D/g, '');
     const adminEmailClean = (settings.adminEmail || INITIAL_SETTINGS.adminEmail || '').trim().toLowerCase();
     const expectedPassword = settings.adminPassword || INITIAL_SETTINGS.adminPassword || 'My1Build2@3';
     const configuredPin = settings.adminPin?.trim() || INITIAL_SETTINGS.adminPin?.trim();
@@ -1441,6 +1909,8 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       (adminEmailClean && cleanId === adminEmailClean) ||
       cleanId === 'shariqalig881@gmail.com' ||
       cleanId === 'secretary@society.com' ||
+      cleanPhone === FIXED_ADMIN_PHONE ||
+      cleanPhone.endsWith(FIXED_ADMIN_PHONE) ||
       (cleanPhone && cleanPhone.length >= 7 && (cleanPhone === adminPhoneClean || adminPhoneClean.endsWith(cleanPhone) || cleanPhone.endsWith(adminPhoneClean)));
 
     if (!isMatch) {
@@ -1463,8 +1933,8 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const session: UserSession = {
       role: 'admin',
-      name: 'Society Secretary',
-      phone: settings.adminPhone || INITIAL_SETTINGS.adminPhone,
+      name: FIXED_ADMIN_NAME,
+      phone: FIXED_ADMIN_PHONE,
       email: settings.adminEmail || INITIAL_SETTINGS.adminEmail,
       flatId: settings.adminFlatId || INITIAL_SETTINGS.adminFlatId || 'flat-101',
       isCommitteeMember: true,
@@ -1577,8 +2047,8 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
         const session: UserSession = {
           role: 'admin',
-          name: 'Society Secretary',
-          phone: settings.adminPhone || INITIAL_SETTINGS.adminPhone,
+          name: FIXED_ADMIN_NAME,
+          phone: FIXED_ADMIN_PHONE,
           email: targetEmail,
           flatId: settings.adminFlatId || INITIAL_SETTINGS.adminFlatId || 'flat-101',
           isCommitteeMember: true,
@@ -1633,8 +2103,8 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const switchToAdminView = () => {
     setAndUnlockSession({
       role: 'admin',
-      name: 'Society Secretary',
-      phone: settings.adminPhone || INITIAL_SETTINGS.adminPhone,
+      name: FIXED_ADMIN_NAME,
+      phone: FIXED_ADMIN_PHONE,
       email: settings.adminEmail || INITIAL_SETTINGS.adminEmail,
       flatId: currentSession?.flatId || settings.adminFlatId || 'flat-101',
       isCommitteeMember: true,
@@ -1767,8 +2237,8 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setMonthlyManualCollections({});
     setAndUnlockSession({
       role: 'admin',
-      name: 'Society Secretary',
-      phone: INITIAL_SETTINGS.adminPhone,
+      name: FIXED_ADMIN_NAME,
+      phone: FIXED_ADMIN_PHONE,
     });
     try {
       localStorage.clear();
@@ -1863,6 +2333,10 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         updateSettings,
         applyChargesToAllFlats,
         updateChargeLabels,
+        addCustomFeeColumn,
+        removeCustomFeeColumn,
+        updateCustomFeeColumn,
+        updateFlatCustomCharge,
         updateFlat,
         updateFlatCustomRate,
         saveNewCycle,
@@ -1878,6 +2352,9 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         updateBroadcast,
         deleteBroadcast,
         setMonthlyManualCollection,
+        resetMonthPaymentData,
+        resetAllPaymentsData,
+        removeMonthCycle,
         checkPhoneRegistration,
         setFlatPin,
         resetFlatPin,
