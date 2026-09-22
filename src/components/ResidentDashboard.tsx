@@ -34,10 +34,22 @@ import {
   HeartHandshake,
   Megaphone,
   User,
+  ArrowRightLeft,
 } from 'lucide-react';
 
 export const ResidentDashboard: React.FC = () => {
-  const { flats, activeCycle, cycles, currentSession, settings, setFlatPin, expenses, broadcasts } = useBuilding();
+  const {
+    flats,
+    activeCycle,
+    cycles,
+    currentSession,
+    settings,
+    setFlatPin,
+    expenses,
+    broadcasts,
+    userFlats,
+    switchFlatView,
+  } = useBuilding();
 
   // Tab State: 'dashboard' (Main statement + current month expenses), 'bills_history', 'building_expenses'
   const [residentTab, setResidentTab] = useState<'dashboard' | 'bills_history' | 'building_expenses'>('dashboard');
@@ -82,7 +94,35 @@ export const ResidentDashboard: React.FC = () => {
   const activeReading = useMemo(() => {
     if (!activeCycle || !flat) return undefined;
     const found = activeCycle.readings.find((r) => r.flatId === flat.id || r.flatNumber === flat.flatNumber);
-    if (found) return found;
+    if (found) {
+      if (flat.customRatePerUnit !== undefined && flat.customRatePerUnit > 0) {
+        const rate = flat.customRatePerUnit;
+        const energy = Math.round(found.unitsConsumed * rate);
+        const common = found.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160;
+        const maint = found.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110;
+        let customSum = 0;
+        if (found.customCharges) {
+          Object.values(found.customCharges).forEach((val) => {
+            customSum += Number(val) || 0;
+          });
+        }
+        const total = energy + common + maint + customSum;
+        const pending = found.pendingAmount ?? 0;
+        const advance = found.advanceAmount ?? 0;
+        const net = Math.max(0, total + pending - advance);
+        const remaining = found.paidAmount !== undefined ? net - found.paidAmount : net;
+        return {
+          ...found,
+          ratePerUnit: rate,
+          calculatedAmount: energy,
+          totalBillAmount: total,
+          netPayableAmount: net,
+          remainingBalance: remaining > 0 ? remaining : 0,
+          advancePaid: remaining < 0 ? Math.abs(remaining) : 0,
+        };
+      }
+      return found;
+    }
 
     // Resilient fallback reading if cycle is missing an entry
     const prev = flat.baselineReading || 0;
@@ -248,6 +288,59 @@ export const ResidentDashboard: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Multi-Flat Unit Switcher Bar (when resident phone is registered with >1 flat) */}
+      {userFlats && userFlats.length > 1 && (
+        <div className="bg-gradient-to-r from-amber-50 via-amber-50/90 to-orange-50 border border-amber-200/90 rounded-2xl p-3.5 shadow-2xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <Home className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                  <span>Your Registered Flats</span>
+                  <span className="text-[10px] font-extrabold bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full">
+                    {userFlats.length} Flats Linked
+                  </span>
+                </div>
+                <div className="text-[11px] text-amber-800">
+                  Switch between your registered units to view individual statements & receipts:
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+              {userFlats.map((f) => {
+                const isSelected = (currentSession?.flatId === f.id) || (flat?.id === f.id);
+                const unitShop = f.flatNumber.toLowerCase().includes('shop');
+                const unitLabel = f.flatNumber.toLowerCase().startsWith('flat') || unitShop ? f.flatNumber : `Flat ${f.flatNumber}`;
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => switchFlatView(f.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shadow-2xs ${
+                      isSelected
+                        ? 'bg-amber-600 text-white shadow-xs ring-2 ring-amber-400'
+                        : 'bg-white hover:bg-amber-100/80 text-slate-800 border border-amber-300'
+                    }`}
+                    title={`Switch to view ${unitLabel}`}
+                  >
+                    <span>{unitShop ? '🏪' : '🏠'}</span>
+                    <span>View as {unitLabel}</span>
+                    {isSelected ? (
+                      <span className="text-[10px] bg-white/20 px-1.5 py-0.2 rounded font-extrabold">Active</span>
+                    ) : (
+                      <ArrowRightLeft className="w-3 h-3 text-slate-400" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Navigation Tabs for Flat Owner */}
       <div className="flex bg-slate-200/80 p-1 rounded-xl text-xs font-semibold overflow-x-auto shadow-2xs gap-1">
@@ -416,7 +509,7 @@ export const ResidentDashboard: React.FC = () => {
             {/* Breakdown of Charges (Energy + Water & stairs + Cleaning + Previous Balance) */}
             <div className="mt-3 bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs space-y-1.5">
               <div className="flex justify-between text-slate-700">
-                <span>Electricity / Energy Amount ({activeReading.unitsConsumed} Units)</span>
+                <span>Electricity / Energy Amount ({activeReading.unitsConsumed} Units @ ₹{activeReading.ratePerUnit}/u)</span>
                 <span className="font-semibold text-slate-900">₹{activeReading.calculatedAmount.toLocaleString('en-IN')}/-</span>
               </div>
               <div className="flex justify-between text-slate-700">

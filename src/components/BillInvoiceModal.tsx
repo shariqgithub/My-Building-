@@ -12,6 +12,7 @@ import {
   Zap,
   Building2,
   Calendar,
+  Download,
 } from 'lucide-react';
 
 interface BillInvoiceModalProps {
@@ -27,7 +28,7 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
   reading,
   cycle,
 }) => {
-  const { settings, flats, updateCycleDueDate } = useBuilding();
+  const { settings, flats, updateCycleDueDate, currentSession } = useBuilding();
   const [isEditingDueDate, setIsEditingDueDate] = React.useState(false);
   const [dueDateInput, setDueDateInput] = React.useState(cycle.dueDate || '');
 
@@ -37,10 +38,209 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
 
   if (!isOpen) return null;
 
-  const flat = flats.find((f) => f.id === reading.flatId);
+  const flat = flats.find((f) => f.id === reading.flatId || f.flatNumber === reading.flatNumber);
+  const isAdmin = currentSession?.role === 'admin';
+
+  // Strict custom rate enforcement: if flat has special rate (e.g. 6 rs/unit for 101, 102, 103), always calculate with it
+  const effectiveRate =
+    flat?.customRatePerUnit !== undefined && flat.customRatePerUnit > 0
+      ? flat.customRatePerUnit
+      : reading.ratePerUnit;
+  const effectiveEnergyAmount =
+    flat?.customRatePerUnit !== undefined && flat.customRatePerUnit > 0
+      ? Math.round(reading.unitsConsumed * flat.customRatePerUnit)
+      : (reading.calculatedAmount ?? Math.round(reading.unitsConsumed * effectiveRate));
+
+  const commonChg = reading.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160;
+  const maintChg = reading.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110;
+
+  let customSum = 0;
+  if (reading.customCharges) {
+    Object.values(reading.customCharges).forEach((val) => {
+      customSum += Number(val) || 0;
+    });
+  }
+
+  const effectiveTotalBill = effectiveEnergyAmount + commonChg + maintChg + customSum;
+  const pendingAmt = reading.pendingAmount ?? 0;
+  const advanceAmt = reading.advanceAmount ?? 0;
+  const effectiveNetPayable = Math.max(0, effectiveTotalBill + pendingAmt - advanceAmt);
+
+  // Generate clean, self-contained HTML for printing and downloading
+  const generatePrintableHtml = () => {
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Electricity Sub-Meter Bill - Flat ${reading.flatNumber} - ${cycle.month}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+    body { padding: 32px 24px; color: #0f172a; background: #fff; font-size: 13px; line-height: 1.5; max-width: 600px; margin: 0 auto; }
+    .header { border-bottom: 2px solid #e2e8f0; padding-bottom: 14px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-start; }
+    .title { font-size: 18px; font-weight: 800; color: #0f172a; margin-bottom: 2px; }
+    .subtitle { font-size: 12px; color: #64748b; }
+    .meta-box { text-align: right; }
+    .badge { display: inline-block; background: #fef3c7; color: #92400e; padding: 3px 8px; border-radius: 6px; font-weight: 700; font-size: 11px; margin-bottom: 4px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 16px; }
+    .grid-label { font-size: 10px; color: #94a3b8; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; }
+    .grid-val { font-weight: 700; color: #1e293b; font-size: 13px; }
+    .table { width: 100%; border-collapse: collapse; margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+    .table th { background: #f1f5f9; padding: 8px 10px; font-size: 11px; text-transform: uppercase; color: #475569; text-align: left; border-bottom: 1px solid #cbd5e1; }
+    .table td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; font-size: 12px; }
+    .charges-box { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+    .charge-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 12px; color: #334155; }
+    .total-row { display: flex; justify-content: space-between; padding-top: 8px; margin-top: 6px; border-top: 2px solid #f59e0b; font-size: 15px; font-weight: 800; color: #78350f; }
+    .status-paid { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; border-radius: 6px; padding: 8px 12px; font-weight: 700; font-size: 12px; margin-bottom: 16px; text-align: center; }
+    .footer { text-align: center; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 12px; }
+    @media print {
+      body { padding: 10mm; max-width: 100%; }
+      @page { margin: 10mm; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="title">${settings.buildingName}</div>
+      <div class="subtitle">${settings.address}</div>
+      <div class="subtitle">Main Meter: ${settings.commonMeterNumber} | ${settings.electricityBoard}</div>
+    </div>
+    <div class="meta-box">
+      <div class="badge">${cycle.month}</div>
+      <div style="font-size: 11px; color: #64748b;">Bill Date: ${cycle.generatedDate}</div>
+      ${cycle.dueDate ? `<div style="font-size: 11px; color: #b45309; font-weight: 600;">Due: ${cycle.dueDate}</div>` : ''}
+    </div>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="grid-label">Flat / Shop Information</div>
+      <div class="grid-val">${reading.flatNumber.toLowerCase().includes('shop') ? reading.flatNumber : `Flat ${reading.flatNumber}`}</div>
+      <div style="color: #475569; font-size: 12px;">${flat?.ownerName || `Resident`}</div>
+      <div style="color: #64748b; font-size: 11px;">+91 ${flat?.phone || ''}</div>
+    </div>
+    <div>
+      <div class="grid-label">Sub-Meter Number</div>
+      <div class="grid-val">${flat?.meterNumber || `SUB-${reading.flatNumber}`}</div>
+      <div style="color: #475569; font-size: 12px;">Floor: ${flat?.floor ?? 1}</div>
+      <div style="font-size: 11px; font-weight: 700; color: ${reading.paymentStatus === 'paid' ? '#059669' : '#e11d48'};">
+        STATUS: ${reading.paymentStatus.toUpperCase()}
+      </div>
+    </div>
+  </div>
+
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Prev Reading</th>
+        <th>Curr Reading</th>
+        <th style="text-align: center;">Units Consumed</th>
+        <th style="text-align: right;">Rate / Unit</th>
+        <th style="text-align: right;">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>${reading.previousReading}</td>
+        <td>${reading.currentReading}</td>
+        <td style="text-align: center; font-weight: 700;">${reading.unitsConsumed} Units</td>
+        <td style="text-align: right;">₹${effectiveRate}/unit</td>
+        <td style="text-align: right; font-weight: 700;">₹${effectiveEnergyAmount.toLocaleString('en-IN')}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="charges-box">
+    <div class="charge-row">
+      <span>Electricity / Energy (${reading.unitsConsumed} units @ ₹${effectiveRate}/u):</span>
+      <span style="font-weight: 600;">₹${effectiveEnergyAmount.toLocaleString('en-IN')}/-</span>
+    </div>
+    <div class="charge-row">
+      <span>${reading.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light'}:</span>
+      <span style="font-weight: 600;">₹${commonChg.toLocaleString('en-IN')}/-</span>
+    </div>
+    <div class="charge-row">
+      <span>${reading.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning'}:</span>
+      <span style="font-weight: 600;">₹${maintChg.toLocaleString('en-IN')}/-</span>
+    </div>
+    ${cycle.customColumns?.map(col => {
+      const val = reading.customCharges?.[col.id] ?? reading.customCharges?.[col.name] ?? col.defaultAmount ?? 0;
+      return `<div class="charge-row"><span>${col.name}:</span><span style="font-weight: 600;">₹${Number(val).toLocaleString('en-IN')}/-</span></div>`;
+    }).join('') || ''}
+    ${pendingAmt > 0 ? `<div class="charge-row" style="color: #e11d48; font-weight: 600;"><span>Pending / Unpaid Carry-Forward:</span><span>+₹${pendingAmt.toLocaleString('en-IN')}/-</span></div>` : ''}
+    ${advanceAmt > 0 ? `<div class="charge-row" style="color: #059669; font-weight: 600;"><span>Advance Paid Credit Deducted:</span><span>-₹${advanceAmt.toLocaleString('en-IN')}/-</span></div>` : ''}
+    <div class="total-row">
+      <span>Net Payable Amount:</span>
+      <span>₹${effectiveNetPayable.toLocaleString('en-IN')}/-</span>
+    </div>
+    ${reading.paidAmount !== undefined && reading.paidAmount > 0 ? `
+    <div class="charge-row" style="margin-top: 6px; color: #065f46; font-weight: 700;">
+      <span>Amount Paid:</span>
+      <span>₹${reading.paidAmount.toLocaleString('en-IN')}/-</span>
+    </div>` : ''}
+  </div>
+
+  ${reading.paymentStatus === 'paid' ? `
+  <div class="status-paid">
+    ✔ PAYMENT RECEIVED IN FULL ${reading.paidDate ? `• ${reading.paidDate}` : ''} ${reading.upiReference ? `(Ref: ${reading.upiReference})` : ''}
+  </div>` : ''}
+
+  <div class="footer">
+    This is an official computer-generated sub-meter electricity bill for ${settings.buildingName}.
+  </div>
+</body>
+</html>`;
+  };
 
   const handlePrint = () => {
+    try {
+      let printFrame = document.getElementById('receipt-print-iframe') as HTMLIFrameElement;
+      if (!printFrame) {
+        printFrame = document.createElement('iframe');
+        printFrame.id = 'receipt-print-iframe';
+        printFrame.style.position = 'fixed';
+        printFrame.style.right = '0';
+        printFrame.style.bottom = '0';
+        printFrame.style.width = '0';
+        printFrame.style.height = '0';
+        printFrame.style.border = '0';
+        document.body.appendChild(printFrame);
+      }
+
+      const html = generatePrintableHtml();
+      const frameDoc = printFrame.contentWindow?.document;
+      if (frameDoc) {
+        frameDoc.open();
+        frameDoc.write(html);
+        frameDoc.close();
+
+        setTimeout(() => {
+          try {
+            printFrame.contentWindow?.focus();
+            printFrame.contentWindow?.print();
+          } catch {
+            window.print();
+          }
+        }, 250);
+        return;
+      }
+    } catch {
+      // Fallback
+    }
     window.print();
+  };
+
+  const handleDownloadReceipt = () => {
+    const html = generatePrintableHtml();
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Bill_Flat_${reading.flatNumber}_${cycle.month.replace(/\s+/g, '_')}.html`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   const handleShareWhatsApp = () => {
@@ -52,18 +252,18 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
       previousReading: reading.previousReading,
       currentReading: reading.currentReading,
       unitsConsumed: reading.unitsConsumed,
-      calculatedAmount: reading.calculatedAmount,
-      commonMeterCharges: reading.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160,
+      calculatedAmount: effectiveEnergyAmount,
+      commonMeterCharges: commonChg,
       commonMeterLabel: reading.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light',
-      maintenanceCharges: reading.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110,
+      maintenanceCharges: maintChg,
       maintenanceLabel: reading.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning',
       customColumns: cycle.customColumns,
       customCharges: reading.customCharges,
-      totalBillAmount: reading.totalBillAmount,
-      pendingAmount: reading.pendingAmount,
-      advanceAmount: reading.advanceAmount,
+      totalBillAmount: effectiveTotalBill,
+      pendingAmount: pendingAmt,
+      advanceAmount: advanceAmt,
       previousBalance: reading.previousBalance,
-      netPayableAmount: reading.netPayableAmount,
+      netPayableAmount: effectiveNetPayable,
     });
 
     const phone = flat?.phone.replace(/\D/g, '') || '';
@@ -84,22 +284,36 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
           </span>
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={handlePrint}
-              className="p-1.5 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-colors"
-              title="Print or Save as PDF"
+              className="p-1.5 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+              title="Print receipt or save as PDF"
             >
               <Printer className="w-4 h-4" />
             </button>
             <button
-              onClick={handleShareWhatsApp}
-              className="p-1.5 text-emerald-600 hover:text-emerald-700 rounded-lg hover:bg-emerald-50 transition-colors"
-              title="Share Bill via WhatsApp"
+              type="button"
+              onClick={handleDownloadReceipt}
+              className="p-1.5 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+              title="Download bill receipt (.html)"
             >
-              <Share2 className="w-4 h-4" />
+              <Download className="w-4 h-4" />
             </button>
+            {/* Share to WhatsApp is strictly restricted to Admin only */}
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={handleShareWhatsApp}
+                className="p-1.5 text-emerald-600 hover:text-emerald-700 rounded-lg hover:bg-emerald-50 transition-colors cursor-pointer"
+                title="Share Bill via WhatsApp (Admin Only)"
+              >
+                <Share2 className="w-4 h-4" />
+              </button>
+            )}
             <button
+              type="button"
               onClick={onClose}
-              className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+              className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -217,6 +431,7 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
                   <th className="p-2.5 font-semibold">Previous</th>
                   <th className="p-2.5 font-semibold">Current</th>
                   <th className="p-2.5 font-semibold text-center">Units Consumed</th>
+                  <th className="p-2.5 font-semibold text-right">Rate / Unit</th>
                   <th className="p-2.5 font-semibold text-right">Amount</th>
                 </tr>
               </thead>
@@ -227,8 +442,11 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
                   <td className="p-2.5 text-center font-bold text-slate-900">
                     {reading.unitsConsumed} Units
                   </td>
+                  <td className="p-2.5 text-right font-semibold text-emerald-700">
+                    ₹{effectiveRate}/u
+                  </td>
                   <td className="p-2.5 text-right font-bold text-slate-900">
-                    ₹{reading.calculatedAmount.toLocaleString('en-IN')}
+                    ₹{effectiveEnergyAmount.toLocaleString('en-IN')}
                   </td>
                 </tr>
               </tbody>
@@ -238,8 +456,15 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
           {/* Bill Calculation Explanation */}
           <div className="p-3 bg-amber-50/60 border border-amber-200/80 rounded-xl text-xs space-y-1.5">
             <div className="flex justify-between font-medium text-amber-950">
-              <span>Energy Charges ({reading.unitsConsumed} units)</span>
-              <span>₹{reading.calculatedAmount.toLocaleString('en-IN')}/-</span>
+              <span>
+                Energy Charges ({reading.unitsConsumed} units @ ₹{effectiveRate}/unit)
+                {flat?.customRatePerUnit && (
+                  <span className="ml-1.5 text-[10px] font-extrabold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300">
+                    Special Rate ₹{flat.customRatePerUnit}/u
+                  </span>
+                )}
+              </span>
+              <span className="font-bold">₹{effectiveEnergyAmount.toLocaleString('en-IN')}/-</span>
             </div>
             <div className="flex justify-between text-slate-700 text-xs">
               <span>{reading.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light'}</span>
@@ -280,7 +505,7 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
 
             <div className="border-t border-amber-200/80 pt-1.5 flex justify-between text-slate-800">
               <span>Current Month Total Bill:</span>
-              <span className="font-bold">₹{reading.totalBillAmount.toLocaleString('en-IN')}/-</span>
+              <span className="font-bold">₹{effectiveTotalBill.toLocaleString('en-IN')}/-</span>
             </div>
 
             {/* Pending Amount from Previous Month */}
@@ -331,7 +556,7 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
             <div className="border-t-2 border-amber-300 pt-1.5 flex justify-between font-extrabold text-sm text-slate-900">
               <span>Net Payable Amount:</span>
               <span className="text-amber-900 text-base">
-                ₹{(reading.netPayableAmount ?? reading.totalBillAmount).toLocaleString('en-IN')}/-
+                ₹{effectiveNetPayable.toLocaleString('en-IN')}/-
               </span>
             </div>
 
@@ -382,20 +607,45 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
         </div>
 
         {/* Action Buttons (Hidden when printing) */}
-        <div className="flex gap-2.5 pt-4 mt-4 border-t border-slate-100 print:hidden">
+        <div className="flex flex-wrap items-center gap-2 pt-4 mt-4 border-t border-slate-100 print:hidden">
+          {/* Send on WhatsApp is ONLY visible to Admin */}
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={handleShareWhatsApp}
+              className="flex-1 min-w-[140px] py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              Send on WhatsApp
+            </button>
+          )}
+
           <button
-            onClick={handleShareWhatsApp}
-            className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors shadow-xs"
-          >
-            <Share2 className="w-3.5 h-3.5" />
-            Send on WhatsApp
-          </button>
-          <button
+            type="button"
             onClick={handlePrint}
-            className="py-2 px-4 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors"
+            className={`${isAdmin ? 'py-2 px-3 border border-slate-300 hover:bg-slate-50 text-slate-700' : 'flex-1 py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white shadow-xs'} font-semibold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer`}
+            title="Print receipt or save as PDF"
           >
             <Printer className="w-3.5 h-3.5" />
-            Print / PDF
+            <span>Print / Save PDF</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleDownloadReceipt}
+            className="py-2 px-3 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            title="Download formatted receipt file"
+          >
+            <Download className="w-3.5 h-3.5 text-slate-500" />
+            <span className="hidden sm:inline">Download</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="py-2 px-3 border border-slate-200 hover:bg-slate-100 text-slate-600 font-semibold text-xs rounded-xl transition-colors cursor-pointer"
+          >
+            Close
           </button>
         </div>
       </div>

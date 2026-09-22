@@ -103,3 +103,47 @@ html.dark ::-webkit-scrollbar-thumb {
 html.dark ::-webkit-scrollbar-thumb:hover {
   background: #6b7280;
 }
+
+/* Print Styles for Receipts and Invoices */
+@media print {
+  @page {
+    margin: 10mm;
+    size: auto;
+  }
+
+  body, html {
+    background: #ffffff !important;
+    color: #000000 !important;
+    overflow: visible !important;
+  }
+
+  /* Hide navigation, mobile frame, background app container */
+  header, nav, #root > div > header, .print\:hidden {
+    display: none !important;
+  }
+
+  /* Make modal container full width and static */
+  .fixed.inset-0 {
+    position: static !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: block !important;
+  }
+
+  .fixed.inset-0 > div {
+    max-width: 100% !important;
+    width: 100% !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  #printable-bill {
+    display: block !important;
+    width: 100% !important;
+    padding: 0 !important;
+  }
+}
+

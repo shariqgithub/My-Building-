@@ -852,16 +852,6 @@ export const AdminDashboard: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => switchToResidentView('flat-101')}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs rounded-xl border border-indigo-200 shadow-2xs transition-colors cursor-pointer"
-            title="Preview confidential bill and payment portal exactly as seen by a resident"
-          >
-            <Eye className="w-3.5 h-3.5 text-indigo-600" />
-            <span>Preview as Resident (Flat 101)</span>
-          </button>
-
-          <button
-            type="button"
             onClick={handleOpenStartNextMonth}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
             title="Create next billing month and enter payment due date"

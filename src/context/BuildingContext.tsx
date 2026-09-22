@@ -488,7 +488,38 @@ export const deduplicateFlatsAndCycles = (
     }
 
     const validReadings = cleanedFlats
-      .map((f) => readingMap.get(f.id))
+      .map((f) => {
+        const r = readingMap.get(f.id);
+        if (!r) return undefined;
+        // Enforce customRatePerUnit if configured for this flat (e.g. 6 rs/unit)
+        if (f.customRatePerUnit !== undefined && f.customRatePerUnit > 0) {
+          const rate = f.customRatePerUnit;
+          const energy = Math.round(r.unitsConsumed * rate);
+          const common = r.commonMeterCharges ?? 160;
+          const maint = r.maintenanceCharges ?? 110;
+          let customSum = 0;
+          if (r.customCharges) {
+            Object.values(r.customCharges).forEach((val) => {
+              customSum += Number(val) || 0;
+            });
+          }
+          const total = energy + common + maint + customSum;
+          const pending = r.pendingAmount ?? 0;
+          const advance = r.advanceAmount ?? 0;
+          const net = Math.max(0, total + pending - advance);
+          const remaining = r.paidAmount !== undefined ? net - r.paidAmount : net;
+          return {
+            ...r,
+            ratePerUnit: rate,
+            calculatedAmount: energy,
+            totalBillAmount: total,
+            netPayableAmount: net,
+            remainingBalance: remaining > 0 ? remaining : 0,
+            advancePaid: remaining < 0 ? Math.abs(remaining) : 0,
+          };
+        }
+        return r;
+      })
       .filter((r): r is FlatReadingEntry => Boolean(r));
 
     return {
@@ -2451,13 +2482,21 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   );
 
   const switchToResidentView = (targetFlatId?: string) => {
-    const flatIdToUse = targetFlatId || currentSession?.flatId || settings.adminFlatId || flats[0]?.id || 'flat-101';
-    const targetFlat = flats.find((f) => f.id === flatIdToUse) || flats[0];
+    let targetFlat = targetFlatId ? flats.find((f) => f.id === targetFlatId) : undefined;
+    if (!targetFlat && targetFlatId) {
+      targetFlat = flats.find((f) => normalizeFlatNumber(f.flatNumber) === normalizeFlatNumber(targetFlatId));
+    }
+    if (!targetFlat) {
+      targetFlat =
+        flats.find((f) => f.id === settings.adminFlatId || normalizeFlatNumber(f.flatNumber) === 'flat-101') ||
+        flats.find((f) => isPhoneMatch(f.phone, FIXED_ADMIN_PHONE)) ||
+        flats[0];
+    }
     setAndUnlockSession({
       role: 'resident',
       flatId: targetFlat.id,
       flatNumber: targetFlat.flatNumber,
-      phone: targetFlat.phone,
+      phone: currentSession?.phone || FIXED_ADMIN_PHONE,
       name: targetFlat.ownerName,
       email: currentSession?.email || settings.adminEmail,
       isCommitteeMember: true, // Keep committee privileges!
@@ -2484,10 +2523,43 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const userFlats = useMemo(() => {
-    if (!currentSession?.phone) return [];
-    const clean = currentSession.phone.replace(/\D/g, '');
-    const ten = clean.length > 10 ? clean.slice(-10) : clean;
-    const rawMatches = flats.filter((f) => isPhoneMatch(f.phone, ten));
+    if (!currentSession) return [];
+
+    // Collect candidate phone numbers for the active session
+    const phonesToTry = new Set<string>();
+    if (currentSession.phone) {
+      const clean = currentSession.phone.replace(/\D/g, '');
+      const ten = clean.length > 10 ? clean.slice(-10) : clean;
+      if (ten && ten.length >= 7) phonesToTry.add(ten);
+    }
+
+    const currentFlat = flats.find(
+      (f) => f.id === currentSession.flatId || normalizeFlatNumber(f.flatNumber) === normalizeFlatNumber(currentSession.flatNumber)
+    );
+    if (currentFlat?.phone) {
+      const parts = currentFlat.phone.split(/[,/;\s]+/);
+      for (const p of parts) {
+        const clean = p.replace(/\D/g, '');
+        const ten = clean.length > 10 ? clean.slice(-10) : clean;
+        if (ten && ten.length >= 7) phonesToTry.add(ten);
+      }
+    }
+
+    if (currentSession.role === 'admin' || currentSession.isCommitteeMember) {
+      const adminClean = (settings.adminPhone || FIXED_ADMIN_PHONE).replace(/\D/g, '');
+      const adminTen = adminClean.length > 10 ? adminClean.slice(-10) : adminClean;
+      if (adminTen) phonesToTry.add(adminTen);
+    }
+
+    if (phonesToTry.size === 0) return currentFlat ? [currentFlat] : [];
+
+    const rawMatches = flats.filter((f) => {
+      for (const p of phonesToTry) {
+        if (isPhoneMatch(f.phone, p)) return true;
+      }
+      return false;
+    });
+
     const seenNumbers = new Set<string>();
     return rawMatches.filter((f) => {
       const key = normalizeFlatNumber(f.flatNumber);
@@ -2495,7 +2567,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       seenNumbers.add(key);
       return true;
     });
-  }, [currentSession?.phone, flats]);
+  }, [currentSession, flats, settings.adminPhone]);
 
   const switchFlatView = (targetFlatId: string) => {
     let targetFlat = flats.find((f) => f.id === targetFlatId);
@@ -2521,6 +2593,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       flatId: targetFlat.id,
       flatNumber: targetFlat.flatNumber,
       name: targetFlat.ownerName,
+      phone: currentSession.phone || targetFlat.phone,
       isCommitteeMember: isSec,
       isPhoneVerified: true,
     };

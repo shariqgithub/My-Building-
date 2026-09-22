@@ -187,7 +187,8 @@ export function computeMonthlyBills(params: ComputeBillParams): {
       effectiveRatePerUnit = calculatedRate;
 
       flats.forEach((f) => {
-        flatReadings.push(buildEntry(f, calculatedRate));
+        const rate = f.customRatePerUnit !== undefined && f.customRatePerUnit > 0 ? f.customRatePerUnit : calculatedRate;
+        flatReadings.push(buildEntry(f, rate));
       });
     }
   } else if (calculationMode === 'flat_specific') {
@@ -202,7 +203,10 @@ export function computeMonthlyBills(params: ComputeBillParams): {
     // Mode B: Fixed Rate
     effectiveRatePerUnit = defaultRatePerUnit;
     flats.forEach((f) => {
-      flatReadings.push(buildEntry(f, defaultRatePerUnit));
+      const rate = f.customRatePerUnit !== undefined && f.customRatePerUnit > 0
+        ? f.customRatePerUnit
+        : defaultRatePerUnit;
+      flatReadings.push(buildEntry(f, rate));
     });
   }
 
