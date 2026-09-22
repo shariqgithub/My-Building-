@@ -132,6 +132,7 @@ interface BuildingContextType {
   loginDirectlyAsFlat: (flatId: string, phone?: string) => { success: boolean; flat?: FlatInfo };
   assignPhoneToFlat: (flatId: string, phone: string) => void;
   userFlats: FlatInfo[];
+  adminFlats: FlatInfo[];
   switchFlatView: (flatId: string) => void;
   addFlat: (flat: Omit<FlatInfo, 'id'>) => Promise<FlatInfo>;
   deleteFlat: (flatId: string) => Promise<void>;
@@ -297,18 +298,20 @@ export const isPhoneMatch = (flatPhone: string | undefined, queryPhone: string):
   if (!flatPhone || !queryPhone) return false;
   const qClean = queryPhone.replace(/\D/g, '');
   const qTen = qClean.length > 10 ? qClean.slice(-10) : qClean;
-  if (!qTen || qTen.length < 5) return false;
+  if (!qTen || qTen.length < 7) return false;
 
   const parts = flatPhone.split(/[,/;\s]+/);
   for (const part of parts) {
     const pClean = part.replace(/\D/g, '');
     const pTen = pClean.length > 10 ? pClean.slice(-10) : pClean;
-    if (pTen === qTen || (pTen && qTen && (pTen.endsWith(qTen) || qTen.endsWith(pTen)))) {
+    if (pTen.length >= 7 && (pTen === qTen || pTen.endsWith(qTen) || qTen.endsWith(pTen))) {
       return true;
     }
   }
   const fAllClean = flatPhone.replace(/\D/g, '');
-  if (fAllClean.includes(qTen) || qTen.includes(fAllClean)) return true;
+  if (fAllClean.length >= 7 && (fAllClean.includes(qTen) || qTen.includes(fAllClean))) {
+    return true;
+  }
   return false;
 };
 
@@ -572,6 +575,9 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         if (f.id === 'flat-101' && (!f.phone || f.phone === '9820111101')) {
           return { ...f, phone: '8077649394', ownerName: 'Mohammad Shariq Ansari' };
         }
+        if ((f.id === 'flat-402' || normalizeFlatNumber(f.flatNumber) === 'flat-402') && (!f.phone || f.phone === '9820111402')) {
+          return { ...f, phone: '8077649394', ownerName: 'Mohammad Shariq Ansari' };
+        }
         if (f.id === 'flat-203' && (!f.phone || f.phone === '9820111203')) {
           return { ...f, phone: '9876554327' };
         }
@@ -743,6 +749,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               ...parsed,
               name: FIXED_ADMIN_NAME,
               phone: FIXED_ADMIN_PHONE,
+              flatId: 'flat-101',
             };
           }
           return parsed;
@@ -2492,14 +2499,19 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         flats.find((f) => isPhoneMatch(f.phone, FIXED_ADMIN_PHONE)) ||
         flats[0];
     }
+
+    const adminClean = (settings.adminPhone || FIXED_ADMIN_PHONE).replace(/\D/g, '');
+    const isTargetAdminFlat = isPhoneMatch(targetFlat.phone, adminClean) || targetFlat.id === settings.adminFlatId;
+
     setAndUnlockSession({
       role: 'resident',
       flatId: targetFlat.id,
       flatNumber: targetFlat.flatNumber,
-      phone: currentSession?.phone || FIXED_ADMIN_PHONE,
+      phone: isTargetAdminFlat ? (currentSession?.phone || FIXED_ADMIN_PHONE) : (targetFlat.phone || ''),
       name: targetFlat.ownerName,
-      email: currentSession?.email || settings.adminEmail,
+      email: isTargetAdminFlat ? (currentSession?.email || settings.adminEmail) : undefined,
       isCommitteeMember: true, // Keep committee privileges!
+      isPhoneVerified: true,
     });
   };
 
@@ -2509,8 +2521,9 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       name: FIXED_ADMIN_NAME,
       phone: FIXED_ADMIN_PHONE,
       email: settings.adminEmail || INITIAL_SETTINGS.adminEmail,
-      flatId: currentSession?.flatId || settings.adminFlatId || 'flat-101',
+      flatId: settings.adminFlatId || 'flat-101',
       isCommitteeMember: true,
+      isPhoneVerified: true,
     });
   };
 
@@ -2522,39 +2535,67 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  // Admin's own registered flats (Flat 101, Flat 402, etc. that belong to the Secretary/Admin)
+  const adminFlats = useMemo(() => {
+    const adminClean = (settings.adminPhone || FIXED_ADMIN_PHONE || '8077649394').replace(/\D/g, '');
+    const adminTen = adminClean.length > 10 ? adminClean.slice(-10) : adminClean;
+
+    const matches = flats.filter((f) => {
+      if (isPhoneMatch(f.phone, adminTen)) return true;
+      if (settings.adminFlatId && (f.id === settings.adminFlatId || normalizeFlatNumber(f.flatNumber) === normalizeFlatNumber(settings.adminFlatId))) {
+        return true;
+      }
+      return false;
+    });
+
+    const seenNumbers = new Set<string>();
+    return matches.filter((f) => {
+      const key = normalizeFlatNumber(f.flatNumber);
+      if (seenNumbers.has(key)) return false;
+      seenNumbers.add(key);
+      return true;
+    });
+  }, [flats, settings.adminPhone, settings.adminFlatId]);
+
+  // Flats registered to the active session user:
+  // - In Admin role: strictly adminFlats (Flat 101 & Flat 402)
+  // - In Resident role: strictly the flats linked to the active flat's registered phone (e.g. Shops-02 & Flat 01 for Mr. Bilal)
   const userFlats = useMemo(() => {
     if (!currentSession) return [];
 
-    // Collect candidate phone numbers for the active session
-    const phonesToTry = new Set<string>();
-    if (currentSession.phone) {
-      const clean = currentSession.phone.replace(/\D/g, '');
-      const ten = clean.length > 10 ? clean.slice(-10) : clean;
-      if (ten && ten.length >= 7) phonesToTry.add(ten);
+    // 1. If currently in Admin role, strictly return admin's own flats
+    if (currentSession.role === 'admin') {
+      return adminFlats;
     }
 
+    // 2. If in Resident role, find the specific flat being viewed
     const currentFlat = flats.find(
       (f) => f.id === currentSession.flatId || normalizeFlatNumber(f.flatNumber) === normalizeFlatNumber(currentSession.flatNumber)
     );
+
+    const residentPhones = new Set<string>();
+
+    // Use current flat's registered phone number as the primary identifier
     if (currentFlat?.phone) {
       const parts = currentFlat.phone.split(/[,/;\s]+/);
       for (const p of parts) {
         const clean = p.replace(/\D/g, '');
         const ten = clean.length > 10 ? clean.slice(-10) : clean;
-        if (ten && ten.length >= 7) phonesToTry.add(ten);
+        if (ten && ten.length >= 7) residentPhones.add(ten);
       }
     }
 
-    if (currentSession.role === 'admin' || currentSession.isCommitteeMember) {
-      const adminClean = (settings.adminPhone || FIXED_ADMIN_PHONE).replace(/\D/g, '');
-      const adminTen = adminClean.length > 10 ? adminClean.slice(-10) : adminClean;
-      if (adminTen) phonesToTry.add(adminTen);
+    // If resident is logged in on their own device (not admin previewing via committee member mode)
+    if (!currentSession.isCommitteeMember && currentSession.phone) {
+      const clean = currentSession.phone.replace(/\D/g, '');
+      const ten = clean.length > 10 ? clean.slice(-10) : clean;
+      if (ten && ten.length >= 7) residentPhones.add(ten);
     }
 
-    if (phonesToTry.size === 0) return currentFlat ? [currentFlat] : [];
+    if (residentPhones.size === 0) return currentFlat ? [currentFlat] : [];
 
     const rawMatches = flats.filter((f) => {
-      for (const p of phonesToTry) {
+      for (const p of residentPhones) {
         if (isPhoneMatch(f.phone, p)) return true;
       }
       return false;
@@ -2567,7 +2608,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       seenNumbers.add(key);
       return true;
     });
-  }, [currentSession, flats, settings.adminPhone]);
+  }, [currentSession, flats, adminFlats]);
 
   const switchFlatView = (targetFlatId: string) => {
     let targetFlat = flats.find((f) => f.id === targetFlatId);
@@ -2587,13 +2628,15 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       (adminTen && (tenDigit === adminTen || rawClean === adminCleanPhone))
     );
 
+    const isTargetAdminFlat = isPhoneMatch(targetFlat.phone, adminTen) || targetFlat.id === settings.adminFlatId;
+
     const updatedSession: UserSession = {
       ...currentSession,
       role: 'resident',
       flatId: targetFlat.id,
       flatNumber: targetFlat.flatNumber,
       name: targetFlat.ownerName,
-      phone: currentSession.phone || targetFlat.phone,
+      phone: isTargetAdminFlat ? (currentSession.phone || FIXED_ADMIN_PHONE) : (targetFlat.phone || ''),
       isCommitteeMember: isSec,
       isPhoneVerified: true,
     };
@@ -2929,6 +2972,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         loginDirectlyAsFlat,
         assignPhoneToFlat,
         userFlats,
+        adminFlats,
         switchFlatView,
         addFlat,
         deleteFlat,

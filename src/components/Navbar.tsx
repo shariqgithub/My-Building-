@@ -44,6 +44,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     switchToResidentView,
     switchToAdminView,
     userFlats,
+    adminFlats,
     switchFlatView,
     isCommitteeMember,
     isAppLocked,
@@ -525,9 +526,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                         <p className="text-[10px] text-emerald-800 mb-1.5">
                           View your own flat's bill and statement as a resident:
                         </p>
-                        {userFlats.length > 1 ? (
+                        {adminFlats.length > 1 ? (
                           <div className="space-y-1">
-                            {userFlats.map((f) => {
+                            {adminFlats.map((f) => {
                               const unitShop = f.flatNumber.toLowerCase().includes('shop');
                               const unitLabel = f.flatNumber.toLowerCase().startsWith('flat') || unitShop ? f.flatNumber : `Flat ${f.flatNumber}`;
                               return (
@@ -535,7 +536,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                                   key={f.id}
                                   type="button"
                                   onClick={() => {
-                                    switchFlatView(f.id);
+                                    switchToResidentView(f.id);
                                     setShowRoleMenu(false);
                                   }}
                                   className="w-full py-1.5 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-bold flex items-center justify-between transition-colors cursor-pointer shadow-xs"
@@ -553,13 +554,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                           <button
                             type="button"
                             onClick={() => {
-                              switchToResidentView();
+                              switchToResidentView(adminFlats[0]?.id);
                               setShowRoleMenu(false);
                             }}
                             className="w-full py-1.5 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
                           >
                             <ArrowRightLeft className="w-3.5 h-3.5" />
-                            Switch to Flat View
+                            <span>View as {adminFlats[0]?.flatNumber ? (adminFlats[0].flatNumber.toLowerCase().startsWith('flat') ? adminFlats[0].flatNumber : `Flat ${adminFlats[0].flatNumber}`) : 'Flat View'}</span>
                           </button>
                         )}
                       </div>
@@ -582,7 +583,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                             className="w-full flex items-center justify-between text-xs px-2 py-1 rounded-md text-left text-slate-700 hover:bg-slate-50 transition-colors"
                           >
                             <span className="truncate">
-                              Flat {f.flatNumber}{' '}
+                              {f.flatNumber.toLowerCase().includes('shop') || f.flatNumber.toLowerCase().startsWith('flat') ? f.flatNumber : `Flat ${f.flatNumber}`}{' '}
                               <span className="text-[11px] text-slate-400">({f.ownerName})</span>
                             </span>
                             {f.customRatePerUnit && (
