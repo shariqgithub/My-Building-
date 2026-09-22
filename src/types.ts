@@ -41,8 +41,10 @@ export interface FlatReadingEntry {
   commonMeterLabel?: string; // e.g. "Water & stairs light" or "Common area"
   customCharges?: Record<string, number>; // Dynamic fee charges e.g. { "col-building-charge": 200 }
   totalBillAmount: number; // calculatedAmount + maintenanceCharges + commonMeterCharges + sum(customCharges)
+  pendingAmount?: number; // Explicit pending amount from previous month to add into bill
+  advanceAmount?: number; // Explicit advance amount to deduct from bill
   previousBalance?: number; // Previous month unpaid dues (+ve) or advance credit (-ve)
-  netPayableAmount?: number; // totalBillAmount + (previousBalance || 0)
+  netPayableAmount?: number; // totalBillAmount + (pendingAmount || 0) - (advanceAmount || 0) (or + previousBalance)
   paymentStatus: 'paid' | 'unpaid' | 'pending' | 'partially_paid';
   paidAmount?: number; // Actual amount paid by the flat owner
   remainingBalance?: number; // netPayableAmount - (paidAmount || 0) (if > 0, remaining due; if < 0, advance paid)

@@ -355,12 +355,22 @@ export const ResidentDashboard: React.FC = () => {
                     (@ ₹{activeReading.ratePerUnit.toFixed(2)}/unit)
                   </span>
                 </div>
-                {((activeReading.previousBalance ?? 0) > 0) && (
+                {((activeReading.pendingAmount ?? 0) > 0) && (
+                  <span className="text-xs text-rose-600 font-semibold block mt-1">
+                    Includes +₹{(activeReading.pendingAmount ?? 0).toLocaleString('en-IN')} pending dues from previous month
+                  </span>
+                )}
+                {((activeReading.advanceAmount ?? 0) > 0) && (
+                  <span className="text-xs text-emerald-600 font-semibold block mt-1">
+                    Includes -₹{(activeReading.advanceAmount ?? 0).toLocaleString('en-IN')} advance credit deduction
+                  </span>
+                )}
+                {activeReading.pendingAmount === undefined && activeReading.advanceAmount === undefined && ((activeReading.previousBalance ?? 0) > 0) && (
                   <span className="text-xs text-rose-600 font-semibold block mt-1">
                     Includes +₹{(activeReading.previousBalance ?? 0).toLocaleString('en-IN')} previous unpaid dues
                   </span>
                 )}
-                {((activeReading.previousBalance ?? 0) < 0) && (
+                {activeReading.pendingAmount === undefined && activeReading.advanceAmount === undefined && ((activeReading.previousBalance ?? 0) < 0) && (
                   <span className="text-xs text-emerald-600 font-semibold block mt-1">
                     Includes -₹{Math.abs(activeReading.previousBalance ?? 0).toLocaleString('en-IN')} advance credit deduction
                   </span>
@@ -423,8 +433,32 @@ export const ResidentDashboard: React.FC = () => {
                 <span className="font-bold text-slate-900">₹{activeReading.totalBillAmount.toLocaleString('en-IN')}/-</span>
               </div>
 
-              {/* Previous Balance / Advance Carryover */}
-              {(activeReading.previousBalance !== undefined && activeReading.previousBalance !== 0) && (
+              {/* Pending Amount from Previous Month */}
+              {activeReading.pendingAmount !== undefined && activeReading.pendingAmount > 0 && (
+                <div className="flex justify-between items-center py-1.5 px-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs">
+                  <span className="font-semibold text-rose-800">
+                    Pending Amount (Previous Month Dues):
+                  </span>
+                  <span className="font-bold font-mono text-rose-700">
+                    +₹{activeReading.pendingAmount.toLocaleString('en-IN')}/-
+                  </span>
+                </div>
+              )}
+
+              {/* Advance Amount Deduction */}
+              {activeReading.advanceAmount !== undefined && activeReading.advanceAmount > 0 && (
+                <div className="flex justify-between items-center py-1.5 px-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs">
+                  <span className="font-semibold text-emerald-800">
+                    Advance Amount (Credit Deduction):
+                  </span>
+                  <span className="font-bold font-mono text-emerald-700">
+                    -₹{activeReading.advanceAmount.toLocaleString('en-IN')}/-
+                  </span>
+                </div>
+              )}
+
+              {/* Fallback to Previous Balance / Advance Carryover */}
+              {activeReading.pendingAmount === undefined && activeReading.advanceAmount === undefined && (activeReading.previousBalance !== undefined && activeReading.previousBalance !== 0) && (
                 <div className="flex justify-between items-center py-1 px-2 rounded-lg bg-white border border-slate-200">
                   <span className="font-semibold text-slate-700">
                     {activeReading.previousBalance > 0

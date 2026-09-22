@@ -101,8 +101,10 @@ export const UpiPaymentModal: React.FC<UpiPaymentModalProps> = ({
     }, 2500);
   };
 
-  const hasPreviousDues = (reading.previousBalance ?? 0) > 0;
-  const hasPreviousAdvance = (reading.previousBalance ?? 0) < 0;
+  const hasPendingAmount = (reading.pendingAmount ?? 0) > 0;
+  const hasAdvanceAmount = (reading.advanceAmount ?? 0) > 0;
+  const hasPreviousDues = !hasPendingAmount && (reading.previousBalance ?? 0) > 0;
+  const hasPreviousAdvance = !hasAdvanceAmount && (reading.previousBalance ?? 0) < 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
@@ -144,7 +146,17 @@ export const UpiPaymentModal: React.FC<UpiPaymentModalProps> = ({
                 </span>
               </div>
 
-              {/* Notice if previous balance / advance is included */}
+              {/* Notice if pending / advance is included */}
+              {hasPendingAmount && (
+                <div className="mt-1 inline-block px-2 py-0.5 rounded-md text-[11px] font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+                  Includes +₹{(reading.pendingAmount ?? 0).toLocaleString('en-IN')} pending dues from previous month
+                </div>
+              )}
+              {hasAdvanceAmount && (
+                <div className="mt-1 inline-block px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  Includes -₹{(reading.advanceAmount ?? 0).toLocaleString('en-IN')} advance credit deduction
+                </div>
+              )}
               {hasPreviousDues && (
                 <div className="mt-1 inline-block px-2 py-0.5 rounded-md text-[11px] font-semibold bg-rose-50 text-rose-700 border border-rose-200">
                   Includes +₹{(reading.previousBalance ?? 0).toLocaleString('en-IN')} previous unpaid dues

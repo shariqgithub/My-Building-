@@ -15,6 +15,8 @@ export interface ComputeBillParams {
     commonMeterCharges?: number;
     commonMeterLabel?: string;
     customCharges?: Record<string, number>;
+    pendingAmount?: number;
+    advanceAmount?: number;
     previousBalance?: number;
     paidAmount?: number;
   }>;
@@ -40,6 +42,8 @@ export function computeMonthlyBills(params: ComputeBillParams): {
       commonMeterCharges: number;
       commonMeterLabel: string;
       customCharges: Record<string, number>;
+      pendingAmount: number;
+      advanceAmount: number;
       previousBalance: number;
       paidAmount?: number;
     }
@@ -48,6 +52,13 @@ export function computeMonthlyBills(params: ComputeBillParams): {
 
   readings.forEach((r) => {
     const units = Math.max(0, r.currentReading - r.previousReading);
+    const pending = r.pendingAmount !== undefined
+      ? r.pendingAmount
+      : (r.previousBalance && r.previousBalance > 0 ? r.previousBalance : 0);
+    const advance = r.advanceAmount !== undefined
+      ? r.advanceAmount
+      : (r.previousBalance && r.previousBalance < 0 ? Math.abs(r.previousBalance) : 0);
+
     flatDataMap.set(r.flatId, {
       previous: r.previousReading,
       current: r.currentReading,
@@ -57,7 +68,9 @@ export function computeMonthlyBills(params: ComputeBillParams): {
       commonMeterCharges: r.commonMeterCharges ?? 160,
       commonMeterLabel: r.commonMeterLabel || 'Water & stairs light',
       customCharges: r.customCharges || {},
-      previousBalance: r.previousBalance ?? 0,
+      pendingAmount: pending,
+      advanceAmount: advance,
+      previousBalance: r.previousBalance ?? (pending - advance),
       paidAmount: r.paidAmount,
     });
     totalSubMeterUnits += units;
@@ -78,6 +91,8 @@ export function computeMonthlyBills(params: ComputeBillParams): {
       commonMeterCharges: 160,
       commonMeterLabel: 'Water & stairs light',
       customCharges: {},
+      pendingAmount: 0,
+      advanceAmount: 0,
       previousBalance: 0,
     };
     const energyAmount = Math.round(data.units * rate);
@@ -98,8 +113,10 @@ export function computeMonthlyBills(params: ComputeBillParams): {
     });
 
     const totalBill = energyAmount + (data.maintenanceCharges || 0) + (data.commonMeterCharges || 0) + customSum;
-    const prevBal = data.previousBalance || 0;
-    const netPayable = totalBill + prevBal;
+    const pendingAmt = data.pendingAmount || 0;
+    const advanceAmt = data.advanceAmount || 0;
+    const netAdjustment = pendingAmt - advanceAmt;
+    const netPayable = Math.max(0, totalBill + netAdjustment);
     const paid = data.paidAmount;
     const remaining = paid !== undefined ? netPayable - paid : undefined;
     const advance = remaining !== undefined && remaining < 0 ? Math.abs(remaining) : 0;
@@ -126,7 +143,9 @@ export function computeMonthlyBills(params: ComputeBillParams): {
       commonMeterLabel: data.commonMeterLabel || 'Water & stairs light',
       customCharges: readingCustomCharges,
       totalBillAmount: totalBill,
-      previousBalance: prevBal,
+      pendingAmount: pendingAmt,
+      advanceAmount: advanceAmt,
+      previousBalance: netAdjustment,
       netPayableAmount: netPayable,
       paidAmount: paid,
       remainingBalance: remaining,
@@ -232,6 +251,7 @@ export function generateUpiUrl(params: {
  */
 export function generateWhatsAppBillMessage(params: {
   month: string;
+  dueDate?: string;
   flatNumber: string;
   ownerName: string;
   previousReading: number;
@@ -245,11 +265,14 @@ export function generateWhatsAppBillMessage(params: {
   customColumns?: CustomFeeColumn[];
   customCharges?: Record<string, number>;
   totalBillAmount: number;
+  pendingAmount?: number;
+  advanceAmount?: number;
   previousBalance?: number;
   netPayableAmount?: number;
 }): string {
   const {
     month,
+    dueDate,
     flatNumber,
     ownerName,
     previousReading,
@@ -263,6 +286,8 @@ export function generateWhatsAppBillMessage(params: {
     customColumns = [],
     customCharges = {},
     totalBillAmount,
+    pendingAmount,
+    advanceAmount,
     previousBalance = 0,
     netPayableAmount,
   } = params;
@@ -294,18 +319,26 @@ export function generateWhatsAppBillMessage(params: {
 
   const customFeeBlock = customLines.length > 0 ? `\n${customLines.join('\n')}` : '';
 
-  const previousBalanceLine =
-    previousBalance > 0
-      ? `Previous unpaid dues - *+${previousBalance}/-*`
-      : previousBalance < 0
-      ? `Previous advance credit - *-₹${Math.abs(previousBalance)}/-*`
-      : '';
+  // Pending / Advance lines
+  const adjustmentLines: string[] = [];
+  const effectivePending = pendingAmount !== undefined ? pendingAmount : (previousBalance > 0 ? previousBalance : 0);
+  const effectiveAdvance = advanceAmount !== undefined ? advanceAmount : (previousBalance < 0 ? Math.abs(previousBalance) : 0);
 
-  const netPayable = netPayableAmount ?? (totalBillAmount + previousBalance);
-  const finalTotalLine =
-    previousBalance !== 0
-      ? `*Bill Total - *${totalBillAmount}/-*\n*Net Payable (after dues/advance) - *${netPayable}/-*`
-      : `*Total amount - *${totalBillAmount}/-*`;
+  if (effectivePending > 0) {
+    adjustmentLines.push(`Pending Amount (Previous Month) - *+${effectivePending}/-*`);
+  }
+  if (effectiveAdvance > 0) {
+    adjustmentLines.push(`Advance Amount (Deduction) - *-₹${effectiveAdvance}/-*`);
+  }
+  const adjustmentBlock = adjustmentLines.length > 0 ? `\n${adjustmentLines.join('\n')}` : '';
+
+  const netPayable = netPayableAmount ?? Math.max(0, totalBillAmount + effectivePending - effectiveAdvance);
+  const hasAdjustment = effectivePending > 0 || effectiveAdvance > 0 || previousBalance !== 0;
+  const finalTotalLine = hasAdjustment
+    ? `*Current Month Bill - *₹${totalBillAmount}/-*\n*Net Payable Amount - *₹${netPayable}/-*`
+    : `*Total amount - *₹${totalBillAmount}/-*`;
+
+  const dueDateLine = dueDate ? `\nPayment Due Date - *${dueDate}*` : '';
 
   return `${month} Bill
 *${ownerName}* *${flatDisplay}*
@@ -314,7 +347,7 @@ Current reading - *${currentReading}*
 Total unit - *${unitsConsumed}*
 Amount - *${calculatedAmount}/-*
 ${commonMeterLine}
-${maintenanceLine}${customFeeBlock}${previousBalanceLine ? `\n${previousBalanceLine}` : ''}
-${finalTotalLine}`;
+${maintenanceLine}${customFeeBlock}${adjustmentBlock}
+${finalTotalLine}${dueDateLine}`;
 }
 

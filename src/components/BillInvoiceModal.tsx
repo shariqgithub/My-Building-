@@ -27,7 +27,13 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
   reading,
   cycle,
 }) => {
-  const { settings, flats } = useBuilding();
+  const { settings, flats, updateCycleDueDate } = useBuilding();
+  const [isEditingDueDate, setIsEditingDueDate] = React.useState(false);
+  const [dueDateInput, setDueDateInput] = React.useState(cycle.dueDate || '');
+
+  React.useEffect(() => {
+    setDueDateInput(cycle.dueDate || '');
+  }, [cycle.dueDate]);
 
   if (!isOpen) return null;
 
@@ -40,6 +46,7 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
   const handleShareWhatsApp = () => {
     const text = generateWhatsAppBillMessage({
       month: cycle.month,
+      dueDate: cycle.dueDate,
       flatNumber: reading.flatNumber,
       ownerName: flat?.ownerName || `Flat ${reading.flatNumber} Owner`,
       previousReading: reading.previousReading,
@@ -53,6 +60,8 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
       customColumns: cycle.customColumns,
       customCharges: reading.customCharges,
       totalBillAmount: reading.totalBillAmount,
+      pendingAmount: reading.pendingAmount,
+      advanceAmount: reading.advanceAmount,
       previousBalance: reading.previousBalance,
       netPayableAmount: reading.netPayableAmount,
     });
@@ -118,9 +127,48 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
               <span className="text-[11px] text-slate-400 block">
                 Bill Date: {cycle.generatedDate}
               </span>
-              <span className="text-[11px] font-semibold text-rose-600 block">
-                Due Date: {cycle.dueDate}
-              </span>
+              <div className="mt-1">
+                {isEditingDueDate ? (
+                  <div className="flex items-center justify-end gap-1">
+                    <input
+                      type="date"
+                      value={dueDateInput}
+                      onChange={(e) => setDueDateInput(e.target.value)}
+                      className="text-[11px] font-bold text-slate-800 border border-amber-300 rounded px-1.5 py-0.5 bg-white shadow-2xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (dueDateInput && cycle.id) {
+                          updateCycleDueDate(cycle.id, dueDateInput);
+                          setIsEditingDueDate(false);
+                        }
+                      }}
+                      className="px-1.5 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDueDateInput(cycle.dueDate || '');
+                        setIsEditingDueDate(false);
+                      }}
+                      className="px-1.5 py-0.5 bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px] rounded"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <span
+                    onClick={() => setIsEditingDueDate(true)}
+                    className="text-[11px] font-semibold text-rose-600 block cursor-pointer hover:underline"
+                    title="Click to change payment due date"
+                  >
+                    Due Date: {cycle.dueDate} ✏️
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -235,7 +283,34 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
               <span className="font-bold">₹{reading.totalBillAmount.toLocaleString('en-IN')}/-</span>
             </div>
 
-            {(reading.previousBalance !== undefined && reading.previousBalance !== 0) && (
+            {/* Pending Amount from Previous Month */}
+            {reading.pendingAmount !== undefined && reading.pendingAmount > 0 && (
+              <div className="flex justify-between items-center py-1.5 px-2.5 rounded-lg bg-rose-50 border border-rose-200">
+                <span className="font-semibold text-rose-800 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                  Pending Amount (Previous Month Dues Added):
+                </span>
+                <span className="font-bold font-mono text-rose-700">
+                  +₹{reading.pendingAmount.toLocaleString('en-IN')}/-
+                </span>
+              </div>
+            )}
+
+            {/* Advance Amount Deduction */}
+            {reading.advanceAmount !== undefined && reading.advanceAmount > 0 && (
+              <div className="flex justify-between items-center py-1.5 px-2.5 rounded-lg bg-emerald-50 border border-emerald-200">
+                <span className="font-semibold text-emerald-800 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                  Advance Amount (Credit Deduction):
+                </span>
+                <span className="font-bold font-mono text-emerald-700">
+                  -₹{reading.advanceAmount.toLocaleString('en-IN')}/-
+                </span>
+              </div>
+            )}
+
+            {/* Fallback to previousBalance if pending/advance not explicitly set */}
+            {reading.pendingAmount === undefined && reading.advanceAmount === undefined && (reading.previousBalance !== undefined && reading.previousBalance !== 0) && (
               <div className="flex justify-between items-center py-1 px-2 rounded-lg bg-white border border-amber-200">
                 <span className="font-semibold text-slate-700">
                   {reading.previousBalance > 0

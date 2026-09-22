@@ -35,6 +35,7 @@ import {
   Upload,
   Image as ImageIcon,
   Trash2,
+  Calendar,
   CalendarPlus,
   CreditCard,
   ArrowRight,
@@ -53,6 +54,8 @@ import {
   AlertTriangle,
   Megaphone,
   X,
+  LayoutGrid,
+  List,
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -73,6 +76,7 @@ export const AdminDashboard: React.FC = () => {
     updateFlat,
     updateFlatCustomRate,
     saveNewCycle,
+    updateCycleDueDate,
     updateCycleReadings,
     markPaymentStatus,
     resetMonthPaymentData,
@@ -93,6 +97,12 @@ export const AdminDashboard: React.FC = () => {
   const [showResetConfirmModal, setShowResetConfirmModal] = useState<'month' | 'all' | null>(null);
   const [isResettingPayments, setIsResettingPayments] = useState(false);
   const [resetSuccessMessage, setResetSuccessMessage] = useState<string | null>(null);
+
+  // Editable Payment Due Date state (Admin specified)
+  const [cycleDueDate, setCycleDueDate] = useState<string>(activeCycle?.dueDate || '');
+  const [showNewCycleModal, setShowNewCycleModal] = useState<boolean>(false);
+  const [newCycleMonthName, setNewCycleMonthName] = useState<string>('');
+  const [newCycleDueDate, setNewCycleDueDate] = useState<string>('');
 
   // Reading Entry States
   const [selectedMonth, setSelectedMonth] = useState(activeCycle?.month || 'September 2026');
@@ -130,6 +140,8 @@ export const AdminDashboard: React.FC = () => {
         maintenanceCharges: number;
         maintenanceLabel: string;
         customCharges: Record<string, number>;
+        pendingAmount: number;
+        advanceAmount: number;
       }
     >
   >(() => {
@@ -143,6 +155,8 @@ export const AdminDashboard: React.FC = () => {
         maintenanceCharges: number;
         maintenanceLabel: string;
         customCharges: Record<string, number>;
+        pendingAmount: number;
+        advanceAmount: number;
       }
     > = {};
     const cols = activeCycle?.customColumns || settings.customFeeColumns || [];
@@ -163,6 +177,8 @@ export const AdminDashboard: React.FC = () => {
           maintenanceCharges: r.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110,
           maintenanceLabel: r.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning',
           customCharges: charges,
+          pendingAmount: r.pendingAmount ?? (r.previousBalance && r.previousBalance > 0 ? r.previousBalance : 0),
+          advanceAmount: r.advanceAmount ?? (r.previousBalance && r.previousBalance < 0 ? Math.abs(r.previousBalance) : 0),
         };
       });
     } else {
@@ -179,6 +195,8 @@ export const AdminDashboard: React.FC = () => {
           maintenanceCharges: settings.defaultMaintenanceCharges ?? 110,
           maintenanceLabel: settings.defaultMaintenanceLabel || 'Cleaning',
           customCharges: charges,
+          pendingAmount: 0,
+          advanceAmount: 0,
         };
       });
     }
@@ -194,6 +212,7 @@ export const AdminDashboard: React.FC = () => {
   const [columnSuccessToast, setColumnSuccessToast] = useState('');
 
   const [filterPayment, setFilterPayment] = useState<'all' | 'paid' | 'unpaid' | 'pending' | 'partially_paid'>('all');
+  const [paymentViewMode, setPaymentViewMode] = useState<'table' | 'cards'>('table');
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState<{ reading: FlatReadingEntry; cycle: BillingCycle } | null>(null);
 
@@ -271,6 +290,8 @@ export const AdminDashboard: React.FC = () => {
         maintenanceCharges: number;
         maintenanceLabel: string;
         customCharges: Record<string, number>;
+        pendingAmount: number;
+        advanceAmount: number;
       }
     > = {};
 
@@ -292,6 +313,8 @@ export const AdminDashboard: React.FC = () => {
         maintenanceCharges: r.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110,
         maintenanceLabel: r.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning',
         customCharges: charges,
+        pendingAmount: r.pendingAmount ?? (r.previousBalance && r.previousBalance > 0 ? r.previousBalance : 0),
+        advanceAmount: r.advanceAmount ?? (r.previousBalance && r.previousBalance < 0 ? Math.abs(r.previousBalance) : 0),
       };
     });
     setDraftReadings(map);
@@ -310,7 +333,19 @@ export const AdminDashboard: React.FC = () => {
 
     if (cycleLabel2) setMaintenanceLabel(cycleLabel2);
     else if (settings.defaultMaintenanceLabel) setMaintenanceLabel(settings.defaultMaintenanceLabel);
-  }, [activeCycleId, settings.defaultCommonMeterLabel, settings.defaultMaintenanceLabel]);
+
+    setCycleDueDate(activeCycle.dueDate || '');
+  }, [activeCycleId, activeCycle?.dueDate, settings.defaultCommonMeterLabel, settings.defaultMaintenanceLabel]);
+
+  // Handle direct payment due date change by admin
+  const handleDueDateChange = (newDate: string) => {
+    setCycleDueDate(newDate);
+    if (activeCycle && newDate) {
+      updateCycleDueDate(activeCycle.id, newDate);
+      setSaveSuccessMsg(`Payment due date updated to ${newDate}!`);
+      setTimeout(() => setSaveSuccessMsg(''), 3000);
+    }
+  };
 
   // Update label for common meter (e.g. "Water & stairs light" -> "Common meter")
   const handleUpdateCommonLabel = (newLabel: string) => {
@@ -420,6 +455,8 @@ export const AdminDashboard: React.FC = () => {
       commonMeterCharges: draftReadings[f.id]?.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160,
       commonMeterLabel: draftReadings[f.id]?.commonMeterLabel || commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light',
       customCharges: draftReadings[f.id]?.customCharges || {},
+      pendingAmount: draftReadings[f.id]?.pendingAmount ?? 0,
+      advanceAmount: draftReadings[f.id]?.advanceAmount ?? 0,
     })),
   });
 
@@ -427,11 +464,18 @@ export const AdminDashboard: React.FC = () => {
   const handleSaveReadings = () => {
     const updatedEntries: FlatReadingEntry[] = previewCalculation.flatReadings.map((pr) => {
       const existing = activeCycle.readings.find((r) => r.flatId === pr.flatId);
+      const pendingAmt = draftReadings[pr.flatId]?.pendingAmount ?? pr.pendingAmount ?? 0;
+      const advanceAmt = draftReadings[pr.flatId]?.advanceAmount ?? pr.advanceAmount ?? 0;
+      const netPayable = Math.max(0, pr.totalBillAmount + pendingAmt - advanceAmt);
       return {
         ...pr,
         commonMeterLabel: draftReadings[pr.flatId]?.commonMeterLabel || commonMeterLabel,
         maintenanceLabel: draftReadings[pr.flatId]?.maintenanceLabel || maintenanceLabel,
         customCharges: draftReadings[pr.flatId]?.customCharges || pr.customCharges || {},
+        pendingAmount: pendingAmt,
+        advanceAmount: advanceAmt,
+        previousBalance: pendingAmt - advanceAmt,
+        netPayableAmount: netPayable,
         paymentStatus: existing ? existing.paymentStatus : 'unpaid',
         paidAmount: existing?.paidAmount,
         paidDate: existing?.paidDate,
@@ -451,10 +495,11 @@ export const AdminDashboard: React.FC = () => {
         mainMeterBillAmount: mainBillAmount,
         commonAreaRule: 'divide_by_flat_units',
       },
-      activeCustomColumns
+      activeCustomColumns,
+      cycleDueDate
     );
 
-    setSaveSuccessMsg('Readings, maintenance & custom fees saved!');
+    setSaveSuccessMsg('Readings, maintenance, custom fees & due date saved!');
     setTimeout(() => setSaveSuccessMsg(''), 3000);
   };
 
@@ -564,6 +609,7 @@ export const AdminDashboard: React.FC = () => {
     const flat = flats.find((f) => f.id === reading.flatId);
     const text = generateWhatsAppBillMessage({
       month: activeCycle.month,
+      dueDate: activeCycle.dueDate || cycleDueDate,
       flatNumber: reading.flatNumber,
       ownerName: flat?.ownerName || `Flat ${reading.flatNumber} Resident`,
       previousReading: reading.previousReading,
@@ -577,6 +623,8 @@ export const AdminDashboard: React.FC = () => {
       customColumns: activeCustomColumns,
       customCharges: reading.customCharges || draftReadings[reading.flatId]?.customCharges || {},
       totalBillAmount: reading.totalBillAmount,
+      pendingAmount: reading.pendingAmount ?? draftReadings[reading.flatId]?.pendingAmount,
+      advanceAmount: reading.advanceAmount ?? draftReadings[reading.flatId]?.advanceAmount,
       previousBalance: reading.previousBalance,
       netPayableAmount: reading.netPayableAmount,
     });
@@ -585,6 +633,40 @@ export const AdminDashboard: React.FC = () => {
       ? `https://wa.me/91${phone}?text=${encodeURIComponent(text)}`
       : `https://wa.me/?text=${encodeURIComponent(text)}`;
     window.open(url, '_blank');
+  };
+
+  // Open modal to configure new billing month & its payment due date
+  const handleOpenStartNextMonth = () => {
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const parts = (activeCycle.month || '').split(' ');
+    let nextMonth = 'Next Month';
+    let nextYear = new Date().getFullYear();
+    if (parts.length >= 2) {
+      const currentMonthIndex = months.findIndex((m) => m.toLowerCase() === parts[0].toLowerCase());
+      const currentYear = parseInt(parts[1], 10) || nextYear;
+      if (currentMonthIndex !== -1) {
+        const nextIndex = (currentMonthIndex + 1) % 12;
+        nextYear = nextIndex === 0 ? currentYear + 1 : currentYear;
+        nextMonth = `${months[nextIndex]} ${nextYear}`;
+      }
+    }
+    setNewCycleMonthName(nextMonth);
+    // Suggest 10 days from today or 20th of that month
+    const d = new Date();
+    d.setDate(d.getDate() + 10);
+    setNewCycleDueDate(d.toISOString().split('T')[0]);
+    setShowNewCycleModal(true);
+  };
+
+  const handleConfirmCreateCycle = () => {
+    if (!newCycleMonthName.trim()) return;
+    const nextCycle = createNewCycle({
+      month: newCycleMonthName.trim(),
+      dueDate: newCycleDueDate.trim() || undefined,
+    });
+    setShowNewCycleModal(false);
+    setSaveSuccessMsg(`Started ${nextCycle.month} bill with Payment Due Date: ${nextCycle.dueDate}!`);
+    setTimeout(() => setSaveSuccessMsg(''), 5000);
   };
 
   const filteredReadings = activeCycle.readings.filter((r) => {
@@ -720,9 +802,20 @@ export const AdminDashboard: React.FC = () => {
               <span>Delete Month</span>
             </button>
           )}
-          <span className="text-[11px] text-slate-400">
-            Due Date: <strong className="text-slate-700">{activeCycle.dueDate}</strong>
-          </span>
+          <div className="flex items-center gap-1.5 bg-amber-50/90 border border-amber-300 rounded-xl px-2.5 py-1 shadow-2xs hover:border-amber-400 transition-colors" title="Change payment due date for this month">
+            <Calendar className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+            <label htmlFor="admin-topbar-due-date-input" className="text-[11px] font-bold text-amber-950 whitespace-nowrap cursor-pointer">
+              Due Date:
+            </label>
+            <input
+              type="date"
+              id="admin-topbar-due-date-input"
+              value={cycleDueDate}
+              onChange={(e) => handleDueDateChange(e.target.value)}
+              className="text-xs font-bold text-slate-900 bg-white border border-amber-300 rounded px-1.5 py-0.5 focus:ring-1 focus:ring-amber-500 cursor-pointer shadow-2xs"
+              title="Click to enter or select custom payment due date"
+            />
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
@@ -738,18 +831,14 @@ export const AdminDashboard: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => {
-              const nextCycle = createNewCycle();
-              setSaveSuccessMsg(`Started ${nextCycle.month} bill! All previous remaining balances and advance credits were auto-included.`);
-              setTimeout(() => setSaveSuccessMsg(''), 5000);
-            }}
+            onClick={handleOpenStartNextMonth}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
-            title="Create next billing month and auto-include all remaining unpaid amounts and advance credits"
+            title="Create next billing month and enter payment due date"
           >
             <CalendarPlus className="w-3.5 h-3.5" />
             <span>+ Start Next Month Bill</span>
             <span className="text-[10px] font-normal opacity-90 hidden sm:inline">
-              (Auto-Carries Unpaid Dues & Advances)
+              (Set Due Date)
             </span>
           </button>
         </div>
@@ -924,6 +1013,47 @@ export const AdminDashboard: React.FC = () => {
                     <Check className="w-3.5 h-3.5" /> {saveSuccessMsg}
                   </span>
                 )}
+                {/* Due Date setting */}
+                <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-300 rounded-xl px-2.5 py-1 shadow-2xs">
+                  <Calendar className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                  <label htmlFor="admin-readings-due-date-input" className="text-[11px] font-bold text-amber-950 whitespace-nowrap cursor-pointer">
+                    Payment Due Date:
+                  </label>
+                  <input
+                    type="date"
+                    id="admin-readings-due-date-input"
+                    value={cycleDueDate}
+                    onChange={(e) => handleDueDateChange(e.target.value)}
+                    className="text-xs font-bold text-slate-900 bg-white border border-amber-300 rounded px-1.5 py-0.5 focus:ring-1 focus:ring-amber-500 cursor-pointer shadow-2xs"
+                    title="Click to enter or change payment due date"
+                  />
+                  <div className="hidden sm:flex items-center gap-1 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const d = new Date();
+                        d.setDate(d.getDate() + 7);
+                        handleDueDateChange(d.toISOString().split('T')[0]);
+                      }}
+                      className="px-1.5 py-0.5 bg-white hover:bg-amber-100 text-amber-800 border border-amber-200 rounded font-semibold transition-colors"
+                      title="Set due date 7 days from today"
+                    >
+                      +7d
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const d = new Date();
+                        d.setDate(d.getDate() + 10);
+                        handleDueDateChange(d.toISOString().split('T')[0]);
+                      }}
+                      className="px-1.5 py-0.5 bg-white hover:bg-amber-100 text-amber-800 border border-amber-200 rounded font-semibold transition-colors"
+                      title="Set due date 10 days from today"
+                    >
+                      +10d
+                    </button>
+                  </div>
+                </div>
                 <button
                   type="button"
                   id="add-column-top-btn"
@@ -1161,7 +1291,29 @@ export const AdminDashboard: React.FC = () => {
                       </button>
                     </th>
 
-                    <th className="p-2.5 text-right">Total Bill</th>
+                    {/* Column 1: Pending Amount (Previous Month Dues) */}
+                    <th className="p-2.5 text-center min-w-28 bg-rose-50/70 border-l border-rose-200">
+                      <div className="flex flex-col items-center">
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-bold text-rose-950">Pending</span>
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-200 text-rose-800 leading-none">+ Add</span>
+                        </div>
+                        <span className="text-[10px] text-rose-600 mt-0.5 font-medium">Prev Dues (₹)</span>
+                      </div>
+                    </th>
+
+                    {/* Column 2: Advance Amount (Credit Deduction) */}
+                    <th className="p-2.5 text-center min-w-28 bg-emerald-50/70 border-l border-emerald-200">
+                      <div className="flex flex-col items-center">
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs font-bold text-emerald-950">Advance</span>
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-200 text-emerald-800 leading-none">- Deduct</span>
+                        </div>
+                        <span className="text-[10px] text-emerald-600 mt-0.5 font-medium">Credit (₹)</span>
+                      </div>
+                    </th>
+
+                    <th className="p-2.5 text-right whitespace-nowrap">Net Payable (₹)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -1188,6 +1340,9 @@ export const AdminDashboard: React.FC = () => {
                     });
 
                     const totalAmt = energyAmt + commonAmt + maintAmt + customChargesSum;
+                    const pendingAmt = draftReadings[flat.id]?.pendingAmount ?? 0;
+                    const advanceAmt = draftReadings[flat.id]?.advanceAmount ?? 0;
+                    const netBill = Math.max(0, totalAmt + pendingAmt - advanceAmt);
 
                     return (
                       <tr key={flat.id} className="hover:bg-slate-50/70 transition-colors">
@@ -1339,8 +1494,61 @@ export const AdminDashboard: React.FC = () => {
                           —
                         </td>
 
-                        <td className="p-2.5 text-right font-extrabold text-amber-800 whitespace-nowrap">
-                          ₹{totalAmt.toLocaleString('en-IN')}/-
+                        {/* Column 1: Pending Amount (Previous Month Dues) Input */}
+                        <td className="p-2.5 text-center bg-rose-50/20 border-l border-rose-100">
+                          <input
+                            type="number"
+                            min="0"
+                            value={pendingAmt}
+                            onChange={(e) => {
+                              const val = Math.max(0, Number(e.target.value) || 0);
+                              setDraftReadings((prevMap) => ({
+                                ...prevMap,
+                                [flat.id]: {
+                                  ...prevMap[flat.id],
+                                  pendingAmount: val,
+                                },
+                              }));
+                            }}
+                            className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-rose-200 bg-white focus:ring-2 focus:ring-rose-500/30 text-center text-rose-800 shadow-2xs"
+                            placeholder="0"
+                            title={`Pending money from previous month for Flat ${flat.flatNumber}`}
+                          />
+                        </td>
+
+                        {/* Column 2: Advance Amount (Credit Deduction) Input */}
+                        <td className="p-2.5 text-center bg-emerald-50/20 border-l border-emerald-100">
+                          <input
+                            type="number"
+                            min="0"
+                            value={advanceAmt}
+                            onChange={(e) => {
+                              const val = Math.max(0, Number(e.target.value) || 0);
+                              setDraftReadings((prevMap) => ({
+                                ...prevMap,
+                                [flat.id]: {
+                                  ...prevMap[flat.id],
+                                  advanceAmount: val,
+                                },
+                              }));
+                            }}
+                            className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-emerald-200 bg-white focus:ring-2 focus:ring-emerald-500/30 text-center text-emerald-800 shadow-2xs"
+                            placeholder="0"
+                            title={`Advance credit deduction for Flat ${flat.flatNumber}`}
+                          />
+                        </td>
+
+                        <td className="p-2.5 text-right font-extrabold whitespace-nowrap">
+                          <div className="text-amber-900 text-sm">
+                            ₹{netBill.toLocaleString('en-IN')}/-
+                          </div>
+                          {(pendingAmt > 0 || advanceAmt > 0) && (
+                            <div className="text-[10px] font-mono font-medium text-slate-500 space-x-1">
+                              {pendingAmt > 0 && <span className="text-rose-600 font-bold">+{pendingAmt}</span>}
+                              {advanceAmt > 0 && <span className="text-emerald-600 font-bold">-{advanceAmt}</span>}
+                              <span className="text-slate-400">base ₹{totalAmt}</span>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );
@@ -1425,6 +1633,22 @@ export const AdminDashboard: React.FC = () => {
                 Collected: <strong className="text-emerald-700 font-bold">₹{activeCycle.totalCollectedAmount.toLocaleString('en-IN')}</strong> / ₹{activeCycle.totalBilledAmount.toLocaleString('en-IN')}
               </span>
 
+              {/* Due Date setting */}
+              <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-300 rounded-lg px-2 py-1 shadow-2xs">
+                <Calendar className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                <label htmlFor="admin-payments-due-date-input" className="text-xs font-bold text-amber-950 cursor-pointer">
+                  Due:
+                </label>
+                <input
+                  type="date"
+                  id="admin-payments-due-date-input"
+                  value={cycleDueDate}
+                  onChange={(e) => handleDueDateChange(e.target.value)}
+                  className="text-xs font-bold text-slate-900 bg-white border border-amber-300 rounded px-1.5 py-0.5 focus:ring-1 focus:ring-amber-500 cursor-pointer shadow-2xs"
+                  title="Click to enter or change payment due date"
+                />
+              </div>
+
               {/* Reset Month Payment Data Button */}
               <button
                 type="button"
@@ -1448,6 +1672,38 @@ export const AdminDashboard: React.FC = () => {
                 <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
                 <span>Reset All Months</span>
               </button>
+
+              {/* View Switcher: Table View (Spreadsheet with Pending/Advance) vs Cards View */}
+              <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                <button
+                  type="button"
+                  id="payment-view-mode-table-btn"
+                  onClick={() => setPaymentViewMode('table')}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs transition-all cursor-pointer ${
+                    paymentViewMode === 'table'
+                      ? 'bg-white text-slate-900 shadow-2xs font-bold'
+                      : 'text-slate-600 hover:text-slate-900 font-semibold'
+                  }`}
+                  title="Spreadsheet Table View with Pending and Advance columns"
+                >
+                  <List className="w-3.5 h-3.5" />
+                  <span>Table View</span>
+                </button>
+                <button
+                  type="button"
+                  id="payment-view-mode-cards-btn"
+                  onClick={() => setPaymentViewMode('cards')}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs transition-all cursor-pointer ${
+                    paymentViewMode === 'cards'
+                      ? 'bg-white text-slate-900 shadow-2xs font-bold'
+                      : 'text-slate-600 hover:text-slate-900 font-semibold'
+                  }`}
+                  title="Card Cards View"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span>Cards View</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1557,8 +1813,163 @@ export const AdminDashboard: React.FC = () => {
             </div>
           )}
 
-          {/* Cards for each flat */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
+          {/* VIEW: SPREADSHEET TABLE or CARDS */}
+          {paymentViewMode === 'table' ? (
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left border-collapse min-w-[950px]">
+                  <thead>
+                    <tr className="bg-slate-100/80 text-slate-700 font-bold border-b border-slate-200">
+                      <th className="p-3 text-center w-16">Flat</th>
+                      <th className="p-3">Resident & Phone</th>
+                      <th className="p-3 text-center">Units</th>
+                      <th className="p-3 text-right">Energy</th>
+                      <th className="p-3 text-right">Common+Maint</th>
+                      <th className="p-3 text-right font-semibold text-slate-800">Month Bill</th>
+                      <th className="p-3 text-center bg-rose-50/70 border-l border-rose-200 text-rose-950">
+                        <div className="flex flex-col items-center">
+                          <span>Pending</span>
+                          <span className="text-[10px] text-rose-600 font-normal">Prev Dues (+)</span>
+                        </div>
+                      </th>
+                      <th className="p-3 text-center bg-emerald-50/70 border-l border-emerald-200 text-emerald-950">
+                        <div className="flex flex-col items-center">
+                          <span>Advance</span>
+                          <span className="text-[10px] text-emerald-600 font-normal">Credit (-)</span>
+                        </div>
+                      </th>
+                      <th className="p-3 text-right bg-amber-50/70 border-l border-amber-200 font-bold text-amber-950">
+                        Net Payable
+                      </th>
+                      <th className="p-3 text-right">Paid Amt</th>
+                      <th className="p-3 text-center">Status</th>
+                      <th className="p-3 text-center">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredReadings.map((reading) => {
+                      const flat = flats.find((f) => f.id === reading.flatId);
+                      const isPaid = reading.paymentStatus === 'paid';
+                      const isPartiallyPaid = reading.paymentStatus === 'partially_paid';
+                      const isPending = reading.paymentStatus === 'pending';
+                      const pendingAmt = reading.pendingAmount ?? (reading.previousBalance && reading.previousBalance > 0 ? reading.previousBalance : 0);
+                      const advanceAmt = reading.advanceAmount ?? (reading.previousBalance && reading.previousBalance < 0 ? Math.abs(reading.previousBalance) : 0);
+                      const netAmt = reading.netPayableAmount ?? (reading.totalBillAmount + pendingAmt - advanceAmt);
+                      const commonPlusMaint = (reading.commonMeterCharges ?? 160) + (reading.maintenanceCharges ?? 110);
+
+                      return (
+                        <tr key={reading.flatId} className="hover:bg-slate-50/70 transition-colors">
+                          <td className="p-3 text-center font-extrabold text-slate-900">
+                            {flat?.flatNumber || reading.flatNumber}
+                          </td>
+                          <td className="p-3">
+                            <div className="font-semibold text-slate-800">{flat?.ownerName || `Flat ${reading.flatNumber}`}</div>
+                            <div className="text-[11px] text-slate-400 font-mono">+91 {flat?.phone}</div>
+                          </td>
+                          <td className="p-3 text-center font-mono font-medium text-slate-700">
+                            {reading.unitsConsumed}
+                          </td>
+                          <td className="p-3 text-right font-mono text-slate-700">
+                            ₹{reading.calculatedAmount.toLocaleString('en-IN')}
+                          </td>
+                          <td className="p-3 text-right font-mono text-slate-700">
+                            ₹{commonPlusMaint.toLocaleString('en-IN')}
+                          </td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-900">
+                            ₹{reading.totalBillAmount.toLocaleString('en-IN')}
+                          </td>
+                          <td className="p-3 text-center bg-rose-50/30 border-l border-rose-100 font-mono font-bold">
+                            {pendingAmt > 0 ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                                +₹{pendingAmt.toLocaleString('en-IN')}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-center bg-emerald-50/30 border-l border-emerald-100 font-mono font-bold">
+                            {advanceAmt > 0 ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                -₹{advanceAmt.toLocaleString('en-IN')}
+                              </span>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-right bg-amber-50/30 border-l border-amber-100 font-mono font-extrabold text-amber-950 text-sm">
+                            ₹{netAmt.toLocaleString('en-IN')}
+                          </td>
+                          <td className="p-3 text-right font-mono">
+                            {reading.paidAmount !== undefined && reading.paidAmount > 0 ? (
+                              <span className="font-bold text-emerald-700">
+                                ₹{reading.paidAmount.toLocaleString('en-IN')}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">₹0</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-center">
+                            {isPaid ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                PAID
+                              </span>
+                            ) : isPartiallyPaid ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                                <Clock className="w-3 h-3 text-amber-600" />
+                                PARTIAL
+                              </span>
+                            ) : isPending ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                                <AlertCircle className="w-3 h-3 text-amber-600" />
+                                PENDING
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
+                                <AlertCircle className="w-3 h-3 text-rose-600" />
+                                UNPAID
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => openPaymentModal(reading)}
+                                className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-[11px] shadow-2xs transition-colors flex items-center gap-1 cursor-pointer"
+                                title="Record or edit payment"
+                              >
+                                <CreditCard className="w-3 h-3" />
+                                <span>Pay</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => sendWhatsAppBill(reading)}
+                                className="p-1 text-emerald-700 hover:bg-emerald-50 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
+                                title="Send WhatsApp Bill"
+                              >
+                                <Share2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedInvoice({ reading, cycle: activeCycle })}
+                                className="p-1 text-slate-700 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+                                title="View Receipt"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            /* Cards for each flat */
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
             {filteredReadings.map((reading) => {
               const flat = flats.find((f) => f.id === reading.flatId);
               const isPaid = reading.paymentStatus === 'paid';
@@ -1655,8 +2066,24 @@ export const AdminDashboard: React.FC = () => {
                       </span>
                     </div>
 
-                    {/* Previous Balance (Arrears / Advance) */}
-                    {reading.previousBalance !== undefined && reading.previousBalance !== 0 && (
+                    {/* Pending Amount from previous month */}
+                    {reading.pendingAmount !== undefined && reading.pendingAmount > 0 && (
+                      <div className="flex items-center justify-between text-[11px] font-semibold py-0.5 text-rose-700 bg-rose-50/80 px-1.5 rounded">
+                        <span>Pending Dues (+ Prev Mo):</span>
+                        <span className="font-mono font-bold">+₹{reading.pendingAmount.toLocaleString('en-IN')}</span>
+                      </div>
+                    )}
+
+                    {/* Advance Amount deduction */}
+                    {reading.advanceAmount !== undefined && reading.advanceAmount > 0 && (
+                      <div className="flex items-center justify-between text-[11px] font-semibold py-0.5 text-emerald-700 bg-emerald-50/80 px-1.5 rounded">
+                        <span>Advance Credit (- Deduction):</span>
+                        <span className="font-mono font-bold">-₹{reading.advanceAmount.toLocaleString('en-IN')}</span>
+                      </div>
+                    )}
+
+                    {/* Fallback to previousBalance if pending/advance not explicitly set */}
+                    {reading.pendingAmount === undefined && reading.advanceAmount === undefined && reading.previousBalance !== undefined && reading.previousBalance !== 0 && (
                       <div className="flex items-center justify-between text-[11px] font-semibold py-0.5">
                         <span className={reading.previousBalance > 0 ? 'text-rose-600' : 'text-emerald-600'}>
                           {reading.previousBalance > 0 ? 'Prev Unpaid Dues:' : 'Prev Advance Credit:'}
@@ -1744,6 +2171,7 @@ export const AdminDashboard: React.FC = () => {
               );
             })}
           </div>
+          )}
         </div>
       )}
 
@@ -2870,7 +3298,23 @@ export const AdminDashboard: React.FC = () => {
                     ₹{(targetReading?.totalBillAmount ?? 0).toLocaleString('en-IN')}
                   </span>
                 </div>
-                {targetReading?.previousBalance !== undefined && targetReading.previousBalance !== 0 && (
+                {targetReading?.pendingAmount !== undefined && targetReading.pendingAmount > 0 && (
+                  <div className="flex justify-between font-semibold text-rose-700 bg-rose-50/80 px-2 py-0.5 rounded">
+                    <span>Pending Dues (+ Prev Mo):</span>
+                    <span className="font-mono font-bold">
+                      +₹{targetReading.pendingAmount.toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                )}
+                {targetReading?.advanceAmount !== undefined && targetReading.advanceAmount > 0 && (
+                  <div className="flex justify-between font-semibold text-emerald-700 bg-emerald-50/80 px-2 py-0.5 rounded">
+                    <span>Advance Credit (- Deduction):</span>
+                    <span className="font-mono font-bold">
+                      -₹{targetReading.advanceAmount.toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                )}
+                {targetReading?.pendingAmount === undefined && targetReading?.advanceAmount === undefined && targetReading?.previousBalance !== undefined && targetReading.previousBalance !== 0 && (
                   <div className="flex justify-between font-medium">
                     <span className={targetReading.previousBalance > 0 ? 'text-rose-700' : 'text-emerald-700'}>
                       {targetReading.previousBalance > 0 ? 'Previous Unpaid Dues:' : 'Previous Advance Credit:'}
@@ -3225,6 +3669,87 @@ export const AdminDashboard: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Create New Billing Cycle Modal with Manual Due Date */}
+      {showNewCycleModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 border border-slate-200 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                  <CalendarPlus className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Start Next Month Bill</h3>
+                  <p className="text-[11px] text-slate-500">Auto-carries unpaid dues and advance balances</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNewCycleModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Billing Month Name:
+                </label>
+                <input
+                  type="text"
+                  value={newCycleMonthName}
+                  onChange={(e) => setNewCycleMonthName(e.target.value)}
+                  placeholder="e.g. October 2026"
+                  className="w-full px-3 py-2 text-sm bg-slate-50 focus:bg-white border border-slate-300 focus:border-emerald-500 rounded-xl font-bold text-slate-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Payment Due Date (Set by You):
+                </label>
+                <input
+                  type="date"
+                  value={newCycleDueDate}
+                  onChange={(e) => setNewCycleDueDate(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-slate-50 focus:bg-white border border-amber-300 focus:border-amber-500 rounded-xl font-bold text-slate-900 cursor-pointer"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  You can enter any payment due date you prefer. It will be printed on bills, WhatsApp messages, and receipts.
+                </p>
+              </div>
+
+              <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-950">
+                <span className="font-bold">Automatic Balance Forwarding:</span>
+                <p className="text-[11px] text-emerald-900 mt-0.5 leading-relaxed">
+                  Any flat that has not paid previous dues will automatically have their pending amount carried forward. Any flat that paid in advance will have their credit deducted.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowNewCycleModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCreateCycle}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <CalendarPlus className="w-3.5 h-3.5" />
+                <span>Create Month with this Due Date</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

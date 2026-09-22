@@ -66,11 +66,13 @@ interface BuildingContextType {
     mainMeterUnits?: number;
     mainMeterBillAmount?: number;
   }) => BillingCycle;
+  updateCycleDueDate: (cycleId: string, dueDate: string) => void;
   updateCycleReadings: (
     cycleId: string,
     readings: BillingCycle['readings'],
     mainMeter?: BillingCycle['mainMeter'],
-    customColumns?: CustomFeeColumn[]
+    customColumns?: CustomFeeColumn[],
+    dueDate?: string
   ) => void;
   addCustomFeeColumn: (
     column: { name: string; defaultAmount: number },
@@ -192,8 +194,18 @@ export function syncCycleBalances(allCycles: BillingCycle[]): BillingCycle[] {
       // 2. Previous balance carried forward from preceding cycle
       const carriedBalance = cycleIndex === 0 ? (r.previousBalance ?? 0) : (flatCumulativeBalance.get(r.flatId) ?? 0);
 
-      // 3. Net payable amount = currentMonthBill + carriedBalance
-      const netPayable = currentMonthBill + carriedBalance;
+      // Handle explicit pendingAmount & advanceAmount if provided, or default from carried balance
+      const pendingAmt = r.pendingAmount !== undefined
+        ? r.pendingAmount
+        : (carriedBalance > 0 ? carriedBalance : 0);
+      const advanceAmt = r.advanceAmount !== undefined
+        ? r.advanceAmount
+        : (carriedBalance < 0 ? Math.abs(carriedBalance) : (r.advancePaid || 0));
+
+      const netAdjustment = pendingAmt - advanceAmt;
+
+      // 3. Net payable amount = currentMonthBill + pendingAmt - advanceAmt
+      const netPayable = Math.max(0, currentMonthBill + netAdjustment);
 
       // 4. Determine paidAmount & remainingBalance
       let paidAmt = r.paidAmount;
@@ -228,9 +240,9 @@ export function syncCycleBalances(allCycles: BillingCycle[]): BillingCycle[] {
       }
 
       // Update the cumulative balance for this flat to carry over to the next cycle
-      flatCumulativeBalance.set(r.flatId, remaining);
+      flatCumulativeBalance.set(r.flatId, remaining < 0 ? -advance : remaining);
 
-      totalBilled += currentMonthBill;
+      totalBilled += netPayable;
       if (paidAmt && paidAmt > 0) {
         totalCollected += paidAmt;
       }
@@ -238,7 +250,9 @@ export function syncCycleBalances(allCycles: BillingCycle[]): BillingCycle[] {
       return {
         ...r,
         totalBillAmount: currentMonthBill,
-        previousBalance: carriedBalance,
+        pendingAmount: pendingAmt,
+        advanceAmount: advanceAmt,
+        previousBalance: netAdjustment,
         netPayableAmount: netPayable,
         paidAmount: paidAmt,
         remainingBalance: remaining,
@@ -404,9 +418,20 @@ export const deduplicateFlatsAndCycles = (
     const readingMap = new Map<string, FlatReadingEntry>();
 
     for (const r of c.readings) {
-      const canonicalId = reassignedMap[r.flatId] || r.flatId;
-      const targetFlat = cleanedFlats.find((f) => f.id === canonicalId);
-      const flatNum = targetFlat ? targetFlat.flatNumber : r.flatNumber;
+      let canonicalId = reassignedMap[r.flatId] || r.flatId;
+      let targetFlat = cleanedFlats.find((f) => f.id === canonicalId);
+      if (!targetFlat) {
+        const norm = normalizeFlatNumber(r.flatNumber || r.flatId);
+        targetFlat = cleanedFlats.find((f) => normalizeFlatNumber(f.flatNumber) === norm || f.id === norm);
+      }
+
+      // If no valid flat exists in cleanedFlats, discard phantom/orphan reading
+      if (!targetFlat) {
+        continue;
+      }
+
+      canonicalId = targetFlat.id;
+      const flatNum = targetFlat.flatNumber;
 
       const updatedReading: FlatReadingEntry = {
         ...r,
@@ -462,9 +487,13 @@ export const deduplicateFlatsAndCycles = (
       }
     }
 
+    const validReadings = cleanedFlats
+      .map((f) => readingMap.get(f.id))
+      .filter((r): r is FlatReadingEntry => Boolean(r));
+
     return {
       ...c,
-      readings: Array.from(readingMap.values()),
+      readings: validReadings,
     };
   });
 
@@ -984,7 +1013,10 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // One-time startup self-healing reconciliation to eliminate duplicate flats (e.g. duplicate Flat 402)
   useEffect(() => {
     const { cleanedFlats, cleanedCycles, reassignedMap } = deduplicateFlatsAndCycles(flats, cycles);
-    const hasChanges = Object.keys(reassignedMap).length > 0 || cleanedFlats.length !== flats.length;
+    const readingMismatch = cycles.some(
+      (c, idx) => c.readings.length !== (cleanedCycles[idx]?.readings.length || 0)
+    );
+    const hasChanges = Object.keys(reassignedMap).length > 0 || cleanedFlats.length !== flats.length || readingMismatch;
     if (hasChanges) {
       setFlats(cleanedFlats);
       setCycles(syncCycleBalances(cleanedCycles));
@@ -1733,11 +1765,31 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return newCycle;
   };
 
+  const updateCycleDueDate = (cycleId: string, dueDate: string) => {
+    let finalUpdatedCycles: BillingCycle[] = [];
+    setCycles((prev) => {
+      const updated = prev.map((c) => {
+        if (c.id !== cycleId) return c;
+        return {
+          ...c,
+          dueDate,
+        };
+      });
+      finalUpdatedCycles = syncCycleBalances(updated);
+      return finalUpdatedCycles;
+    });
+
+    if (finalUpdatedCycles.length > 0) {
+      saveToCloud(undefined, undefined, finalUpdatedCycles);
+    }
+  };
+
   const updateCycleReadings = (
     cycleId: string,
     readings: BillingCycle['readings'],
     mainMeter?: BillingCycle['mainMeter'],
-    customColumns?: CustomFeeColumn[]
+    customColumns?: CustomFeeColumn[],
+    dueDate?: string
   ) => {
     let finalUpdatedCycles: BillingCycle[] = [];
     setCycles((prev) => {
@@ -1751,6 +1803,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return {
           ...c,
           readings,
+          dueDate: dueDate || c.dueDate,
           mainMeter: mainMeter || c.mainMeter,
           customColumns: customColumns !== undefined ? customColumns : c.customColumns,
           totalSubMeterUnits: totalUnits,
@@ -2780,6 +2833,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         updateFlatCustomRate,
         saveNewCycle,
         createNewCycle,
+        updateCycleDueDate,
         updateCycleReadings,
         markPaymentStatus,
         submitResidentPaymentProof,
