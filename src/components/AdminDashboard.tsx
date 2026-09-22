@@ -213,6 +213,12 @@ export const AdminDashboard: React.FC = () => {
 
   const [filterPayment, setFilterPayment] = useState<'all' | 'paid' | 'unpaid' | 'pending' | 'partially_paid'>('all');
   const [paymentViewMode, setPaymentViewMode] = useState<'table' | 'cards'>('table');
+  const [readingViewMode, setReadingViewMode] = useState<'cards' | 'table'>(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      return 'cards';
+    }
+    return 'table';
+  });
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
   const [selectedInvoice, setSelectedInvoice] = useState<{ reading: FlatReadingEntry; cycle: BillingCycle } | null>(null);
 
@@ -344,6 +350,31 @@ export const AdminDashboard: React.FC = () => {
       updateCycleDueDate(activeCycle.id, newDate);
       setSaveSuccessMsg(`Payment due date updated to ${newDate}!`);
       setTimeout(() => setSaveSuccessMsg(''), 3000);
+    }
+  };
+
+  // Auto-calculate main meter units when previous reading or current reading is entered
+  const handleMainPrevReadingChange = (valStr: string) => {
+    if (valStr === '') {
+      setMainPrevReading(0);
+      return;
+    }
+    const val = Number(valStr);
+    setMainPrevReading(val);
+    if (!isNaN(val) && !isNaN(mainCurrReading) && mainCurrReading > 0) {
+      setMainUnits(Math.max(0, mainCurrReading - val));
+    }
+  };
+
+  const handleMainCurrReadingChange = (valStr: string) => {
+    if (valStr === '') {
+      setMainCurrReading(0);
+      return;
+    }
+    const val = Number(valStr);
+    setMainCurrReading(val);
+    if (!isNaN(val) && !isNaN(mainPrevReading)) {
+      setMainUnits(Math.max(0, val - mainPrevReading));
     }
   };
 
@@ -933,55 +964,84 @@ export const AdminDashboard: React.FC = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                  Main Bill Amount (₹)
-                </label>
-                <input
-                  type="number"
-                  value={mainBillAmount}
-                  onChange={(e) => setMainBillAmount(Number(e.target.value))}
-                  placeholder="16000"
-                  className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl font-bold font-mono focus:ring-2 focus:ring-amber-500/30"
-                />
-                <span className="text-[10px] text-slate-400">Total bill received from board</span>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                  Main Meter Units
-                </label>
-                <input
-                  type="number"
-                  value={mainUnits}
-                  onChange={(e) => setMainUnits(Number(e.target.value))}
-                  placeholder="2000"
-                  className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl font-bold font-mono focus:ring-2 focus:ring-amber-500/30"
-                />
-                <span className="text-[10px] text-slate-400">Units on main electricity bill</span>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
                   Main Prev Reading
                 </label>
                 <input
                   type="number"
-                  value={mainPrevReading}
-                  onChange={(e) => setMainPrevReading(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl font-mono text-slate-700"
+                  value={mainPrevReading === 0 ? '' : mainPrevReading}
+                  onChange={(e) => handleMainPrevReadingChange(e.target.value)}
+                  placeholder="48000"
+                  className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl font-mono text-slate-800 focus:ring-2 focus:ring-amber-500/30"
                 />
+                <span className="text-[10px] text-slate-400">Previous meter reading</span>
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
                   Main Curr Reading
                 </label>
                 <input
                   type="number"
-                  value={mainCurrReading}
-                  onChange={(e) => setMainCurrReading(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl font-mono text-slate-700"
+                  value={mainCurrReading === 0 ? '' : mainCurrReading}
+                  onChange={(e) => handleMainCurrReadingChange(e.target.value)}
+                  placeholder="50000"
+                  className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl font-mono text-slate-800 focus:ring-2 focus:ring-amber-500/30 font-bold"
                 />
+                <span className="text-[10px] text-slate-400">Current meter reading</span>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-semibold text-slate-700">
+                    Main Meter Units
+                  </label>
+                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold uppercase tracking-wider">
+                    Auto-Calculated
+                  </span>
+                </div>
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={mainUnits === 0 ? '' : mainUnits}
+                    onChange={(e) => setMainUnits(Number(e.target.value))}
+                    placeholder="2000"
+                    className="w-full px-3 py-2 text-sm bg-emerald-50/50 border border-emerald-300 rounded-xl font-bold font-mono text-emerald-950 focus:ring-2 focus:ring-emerald-500/30"
+                  />
+                  {mainCurrReading > mainPrevReading && (
+                    <button
+                      type="button"
+                      onClick={() => setMainUnits(Math.max(0, mainCurrReading - mainPrevReading))}
+                      className="absolute right-2 top-2 text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-100 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
+                      title="Reset to exact difference: Current - Previous"
+                    >
+                      {mainCurrReading} - {mainPrevReading}
+                    </button>
+                  )}
+                </div>
+                <span className="text-[10px] text-slate-500">
+                  {mainCurrReading >= mainPrevReading ? (
+                    <span className="text-emerald-700 font-medium">
+                      = {mainCurrReading} - {mainPrevReading} = {Math.max(0, mainCurrReading - mainPrevReading)} units
+                    </span>
+                  ) : (
+                    'Calculated automatically as Curr - Prev'
+                  )}
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                  Main Bill Amount (₹)
+                </label>
+                <input
+                  type="number"
+                  value={mainBillAmount === 0 ? '' : mainBillAmount}
+                  onChange={(e) => setMainBillAmount(Number(e.target.value))}
+                  placeholder="16000"
+                  className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl font-bold font-mono focus:ring-2 focus:ring-amber-500/30 text-slate-900"
+                />
+                <span className="text-[10px] text-slate-400">Total bill received from board</span>
               </div>
             </div>
 
@@ -997,27 +1057,65 @@ export const AdminDashboard: React.FC = () => {
 
           {/* Sub-Meters Table for 15 Flats (Requirement 3) */}
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
-            <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+            <div className="p-3.5 bg-slate-50 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div>
-                <h3 className="text-xs sm:text-sm font-bold text-slate-900">
-                  Sub-Meter Readings for 15 Flats
-                </h3>
-                <p className="text-[11px] text-slate-500">
-                  Current readings are entered here. Previous readings are carried forward automatically from the last month and are also directly editable if needed.
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs sm:text-sm font-bold text-slate-900">
+                    Sub-Meter Readings for 15 Flats
+                  </h3>
+                  <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-200">
+                    15 Flats Active
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Current readings are entered here. Previous readings are carried forward automatically and are directly editable.
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 {saveSuccessMsg && (
                   <span className="text-xs font-bold text-emerald-600 flex items-center gap-1 animate-in fade-in">
                     <Check className="w-3.5 h-3.5" /> {saveSuccessMsg}
                   </span>
                 )}
+
+                {/* View Switcher: Mobile Cards View vs Spreadsheet Table View */}
+                <div className="flex items-center bg-slate-200/80 p-0.5 rounded-xl border border-slate-300 shadow-2xs">
+                  <button
+                    type="button"
+                    id="reading-view-mode-cards-btn"
+                    onClick={() => setReadingViewMode('cards')}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs transition-all cursor-pointer ${
+                      readingViewMode === 'cards'
+                        ? 'bg-amber-500 text-slate-950 font-bold shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 font-semibold'
+                    }`}
+                    title="Cards View (Best for Mobile & Android devices - full visibility of all flat fields)"
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <span>Cards View 📱</span>
+                  </button>
+                  <button
+                    type="button"
+                    id="reading-view-mode-table-btn"
+                    onClick={() => setReadingViewMode('table')}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs transition-all cursor-pointer ${
+                      readingViewMode === 'table'
+                        ? 'bg-amber-500 text-slate-950 font-bold shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 font-semibold'
+                    }`}
+                    title="Spreadsheet Table View"
+                  >
+                    <List className="w-3.5 h-3.5" />
+                    <span>Table View 📋</span>
+                  </button>
+                </div>
+
                 {/* Due Date setting */}
                 <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-300 rounded-xl px-2.5 py-1 shadow-2xs">
                   <Calendar className="w-3.5 h-3.5 text-amber-700 shrink-0" />
                   <label htmlFor="admin-readings-due-date-input" className="text-[11px] font-bold text-amber-950 whitespace-nowrap cursor-pointer">
-                    Payment Due Date:
+                    Due:
                   </label>
                   <input
                     type="date"
@@ -1054,22 +1152,24 @@ export const AdminDashboard: React.FC = () => {
                     </button>
                   </div>
                 </div>
+
                 <button
                   type="button"
                   id="add-column-top-btn"
                   onClick={handleOpenAddColumnModal}
                   className="py-1.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
-                  title="Add a new fee column to this table (e.g. Building Charge, Lift Maintenance)"
+                  title="Add a new fee column (e.g. Building Charge, Lift Maintenance)"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>Add Column</span>
+                  <span>Add Col</span>
                 </button>
+
                 <button
                   onClick={handleSaveReadings}
                   className="py-1.5 px-3.5 bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs rounded-xl flex items-center gap-1.5 shadow-xs transition-colors"
                 >
                   <Save className="w-3.5 h-3.5" />
-                  Save & Update All Bills
+                  Save & Publish
                 </button>
               </div>
             </div>
@@ -1206,124 +1306,30 @@ export const AdminDashboard: React.FC = () => {
               )}
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-100 text-slate-700 border-b border-slate-200 uppercase text-[10px] tracking-wider">
-                  <tr>
-                    <th className="p-2.5">Flat No.</th>
-                    <th className="p-2.5">Owner / Sub-Meter</th>
-                    <th className="p-2.5 w-28">
-                      <span className="flex items-center gap-1" title="Editable previous reading">
-                        Prev Reading ✏️
-                      </span>
-                    </th>
-                    <th className="p-2.5 w-28">Curr Reading</th>
-                    <th className="p-2.5 text-center">Net Units</th>
-                    <th className="p-2.5 text-right">Energy Amt</th>
-                    <th className="p-2.5 text-center min-w-36">
-                      <div className="flex flex-col items-center">
-                        <div className="flex items-center gap-1 bg-white px-2 py-0.5 rounded-lg border border-sky-300 hover:border-sky-500 focus-within:ring-2 focus-within:ring-sky-500/30">
-                          <input
-                            type="text"
-                            value={commonMeterLabel}
-                            onChange={(e) => handleUpdateCommonLabel(e.target.value)}
-                            className="w-28 text-center text-xs font-bold text-sky-900 bg-transparent focus:outline-hidden"
-                            title="Click or type to edit this field label (e.g. Common meter)"
-                          />
-                          <Edit3 className="w-3 h-3 text-sky-500 shrink-0 pointer-events-none" />
-                        </div>
-                        <span className="text-[10px] text-slate-400 mt-0.5">(₹) Amount</span>
-                      </div>
-                    </th>
-                    <th className="p-2.5 text-center min-w-32">
-                      <div className="flex flex-col items-center">
-                        <div className="flex items-center gap-1 bg-white px-2 py-0.5 rounded-lg border border-amber-300 hover:border-amber-500 focus-within:ring-2 focus-within:ring-amber-500/30">
-                          <input
-                            type="text"
-                            value={maintenanceLabel}
-                            onChange={(e) => handleUpdateMaintenanceLabel(e.target.value)}
-                            className="w-24 text-center text-xs font-bold text-amber-900 bg-transparent focus:outline-hidden"
-                            title="Click or type to edit this field label (e.g. Cleaning or Maintenance)"
-                          />
-                          <Edit3 className="w-3 h-3 text-amber-500 shrink-0 pointer-events-none" />
-                        </div>
-                        <span className="text-[10px] text-slate-400 mt-0.5">(₹) Amount</span>
-                      </div>
-                    </th>
+            {readingViewMode === 'cards' ? (
+              /* CARDS VIEW: Mobile-Optimized 100% Full-Width Flat Cards */
+              <div className="p-3 sm:p-4 bg-slate-100/70">
+                <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between text-xs text-amber-900">
+                  <div className="flex items-center gap-1.5 font-medium">
+                    <Smartphone className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span><strong>Cards View Active:</strong> All 15 flats and fields are 100% visible on mobile without horizontal scrolling.</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setReadingViewMode('table')}
+                    className="font-bold underline text-amber-950 shrink-0 ml-2 cursor-pointer"
+                  >
+                    Switch to Table
+                  </button>
+                </div>
 
-                    {/* Dynamic Custom Fee Columns */}
-                    {activeCustomColumns.map((col) => (
-                      <th key={col.id} className="p-2.5 text-center min-w-32 bg-indigo-50/50 border-l border-indigo-100">
-                        <div className="flex flex-col items-center">
-                          <div className="flex items-center gap-1 bg-white px-2 py-0.5 rounded-lg border border-indigo-300 hover:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/30">
-                            <input
-                              type="text"
-                              value={col.name}
-                              onChange={(e) => handleRenameColumn(col.id, e.target.value)}
-                              className="w-24 text-center text-xs font-bold text-indigo-950 bg-transparent focus:outline-hidden"
-                              title="Click or type to edit this column name"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveColumn(col.id, col.name)}
-                              className="text-slate-400 hover:text-rose-600 transition-colors p-0.5 cursor-pointer"
-                              title={`Remove ${col.name} column`}
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                          <span className="text-[10px] text-indigo-600 mt-0.5 font-medium">(₹) Amount</span>
-                        </div>
-                      </th>
-                    ))}
-
-                    {/* Header button to quickly add column */}
-                    <th className="p-2.5 text-center w-28 bg-slate-50 border-l border-slate-200">
-                      <button
-                        type="button"
-                        id="add-column-table-header-btn"
-                        onClick={handleOpenAddColumnModal}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-800 bg-white hover:bg-indigo-50 border border-dashed border-indigo-300 hover:border-indigo-400 rounded-lg transition-all shadow-2xs whitespace-nowrap cursor-pointer"
-                        title="Add an extra fee column like Building Charge"
-                      >
-                        <Plus className="w-3 h-3 text-indigo-600" />
-                        <span>Add Col</span>
-                      </button>
-                    </th>
-
-                    {/* Column 1: Pending Amount (Previous Month Dues) */}
-                    <th className="p-2.5 text-center min-w-28 bg-rose-50/70 border-l border-rose-200">
-                      <div className="flex flex-col items-center">
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs font-bold text-rose-950">Pending</span>
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-200 text-rose-800 leading-none">+ Add</span>
-                        </div>
-                        <span className="text-[10px] text-rose-600 mt-0.5 font-medium">Prev Dues (₹)</span>
-                      </div>
-                    </th>
-
-                    {/* Column 2: Advance Amount (Credit Deduction) */}
-                    <th className="p-2.5 text-center min-w-28 bg-emerald-50/70 border-l border-emerald-200">
-                      <div className="flex flex-col items-center">
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs font-bold text-emerald-950">Advance</span>
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-200 text-emerald-800 leading-none">- Deduct</span>
-                        </div>
-                        <span className="text-[10px] text-emerald-600 mt-0.5 font-medium">Credit (₹)</span>
-                      </div>
-                    </th>
-
-                    <th className="p-2.5 text-right whitespace-nowrap">Net Payable (₹)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
                   {flats.map((flat) => {
                     const prev = draftReadings[flat.id]?.previous ?? flat.baselineReading;
                     const curr = draftReadings[flat.id]?.current ?? prev + 100;
                     const units = Math.max(0, curr - prev);
                     const isInvalid = curr < prev;
 
-                    // Calculate flat's rate
                     const rate = flat.customRatePerUnit !== undefined && flat.customRatePerUnit > 0
                       ? flat.customRatePerUnit
                       : previewCalculation.effectiveRatePerUnit;
@@ -1331,7 +1337,6 @@ export const AdminDashboard: React.FC = () => {
                     const commonAmt = draftReadings[flat.id]?.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160;
                     const maintAmt = draftReadings[flat.id]?.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110;
 
-                    // Sum all custom charges for this flat
                     let customChargesSum = 0;
                     activeCustomColumns.forEach((col) => {
                       const flatCharges = draftReadings[flat.id]?.customCharges;
@@ -1345,217 +1350,643 @@ export const AdminDashboard: React.FC = () => {
                     const netBill = Math.max(0, totalAmt + pendingAmt - advanceAmt);
 
                     return (
-                      <tr key={flat.id} className="hover:bg-slate-50/70 transition-colors">
-                        <td className="p-2.5 font-bold text-slate-900">
-                          <div className="flex items-center gap-1">
-                            <span className="inline-block px-2 py-0.5 rounded bg-slate-100 border border-slate-200 font-mono text-xs">
+                      <div
+                        key={flat.id}
+                        className="bg-white rounded-2xl border border-slate-200 shadow-xs p-3.5 flex flex-col justify-between space-y-3 hover:border-amber-300 transition-colors"
+                      >
+                        {/* Top: Flat & Resident Details */}
+                        <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
+                          <div className="flex items-center gap-2">
+                            <span className="inline-block px-2.5 py-1 rounded-lg bg-slate-900 text-white font-mono text-xs font-bold shadow-2xs">
                               Flat {flat.flatNumber}
                             </span>
-                            <button
-                              type="button"
-                              onClick={() => setEditingFlat(flat)}
-                              className="p-1 rounded-md text-slate-400 hover:text-amber-700 hover:bg-amber-100/60 transition-colors"
-                              title={`Edit Flat ${flat.flatNumber}, resident name, or mobile number`}
-                            >
-                              <Edit3 className="w-3 h-3 text-amber-600" />
-                            </button>
-                          </div>
-                        </td>
-                        <td className="p-2.5">
-                          <div className="flex items-center justify-between gap-1.5">
                             <div>
-                              <div className="font-semibold text-slate-800">{flat.ownerName}</div>
+                              <div className="text-xs font-bold text-slate-900 leading-tight">
+                                {flat.ownerName}
+                              </div>
                               <div className="text-[10px] font-mono text-slate-500">
                                 +91 {flat.phone}
                               </div>
                             </div>
+                          </div>
+                          <div className="flex items-center gap-1.5">
                             <button
                               type="button"
                               onClick={() => setEditingFlat(flat)}
-                              className="text-[10px] px-1.5 py-0.5 bg-slate-100 hover:bg-amber-50 text-slate-600 hover:text-amber-800 border border-slate-200 rounded font-semibold transition-colors shrink-0"
+                              className="px-2 py-1 text-[11px] font-semibold text-slate-600 hover:text-amber-800 bg-slate-100 hover:bg-amber-50 rounded-lg border border-slate-200 transition-colors flex items-center gap-1 cursor-pointer"
                               title={`Edit Flat ${flat.flatNumber} details`}
                             >
-                              Edit
+                              <Edit3 className="w-3 h-3 text-amber-600" />
+                              <span>Edit</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const entry = previewCalculation.flatReadings.find((r) => r.flatId === flat.id);
+                                if (entry) sendWhatsAppBill(entry);
+                              }}
+                              className="p-1.5 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
+                              title="Send Bill via WhatsApp"
+                            >
+                              <Send className="w-3.5 h-3.5" />
                             </button>
                           </div>
-                        </td>
-                        <td className="p-2.5">
-                          <input
-                            type="number"
-                            value={prev}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
-                              setDraftReadings((prevMap) => ({
-                                ...prevMap,
-                                [flat.id]: {
-                                  ...prevMap[flat.id],
-                                  previous: val,
-                                  current: curr,
-                                },
-                              }));
-                            }}
-                            className="w-24 px-2 py-1 text-xs font-mono font-semibold rounded-lg border bg-slate-50 border-slate-200 text-slate-800 focus:bg-white focus:ring-2 focus:ring-amber-500/30"
-                            title={`Edit previous meter reading for Flat ${flat.flatNumber}`}
-                          />
-                        </td>
-                        <td className="p-2.5">
-                          <input
-                            type="number"
-                            value={curr}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
-                              setDraftReadings((prevMap) => ({
-                                ...prevMap,
-                                [flat.id]: {
-                                  ...prevMap[flat.id],
-                                  previous: prev,
-                                  current: val,
-                                },
-                              }));
-                            }}
-                            className={`w-24 px-2 py-1 text-xs font-mono font-bold rounded-lg border ${
-                              isInvalid
-                                ? 'bg-rose-50 border-rose-400 text-rose-700'
-                                : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:ring-2 focus:ring-amber-500/30'
-                            }`}
-                          />
-                          {isInvalid && (
-                            <span className="text-[9px] text-rose-600 block mt-0.5 font-semibold">
-                              Must be ≥ {prev}
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-2.5 text-center font-mono font-bold text-amber-700">
-                          {units} u
-                          <span className="text-[10px] font-normal text-slate-400 block">@ ₹{rate.toFixed(1)}/u</span>
-                        </td>
-                        <td className="p-2.5 text-right font-semibold text-slate-800">
-                          ₹{energyAmt.toLocaleString('en-IN')}
-                        </td>
-                        <td className="p-2.5 text-center">
-                          <input
-                            type="number"
-                            value={commonAmt}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
-                              setDraftReadings((prevMap) => ({
-                                ...prevMap,
-                                [flat.id]: {
-                                  ...prevMap[flat.id],
-                                  commonMeterCharges: val,
-                                },
-                              }));
-                            }}
-                            className="w-20 px-2 py-1 text-xs font-mono font-semibold rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500/30 text-center"
-                            placeholder="160"
-                          />
-                        </td>
-                        <td className="p-2.5 text-center">
-                          <input
-                            type="number"
-                            value={maintAmt}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
-                              setDraftReadings((prevMap) => ({
-                                ...prevMap,
-                                [flat.id]: {
-                                  ...prevMap[flat.id],
-                                  maintenanceCharges: val,
-                                },
-                              }));
-                            }}
-                            className="w-20 px-2 py-1 text-xs font-mono font-semibold rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500/30 text-center"
-                            placeholder="110"
-                          />
-                        </td>
+                        </div>
 
-                        {/* Dynamic Custom Fee Columns Inputs */}
-                        {activeCustomColumns.map((col) => {
-                          const flatCharges = draftReadings[flat.id]?.customCharges;
-                          const val = flatCharges?.[col.id] ?? flatCharges?.[col.name] ?? col.defaultAmount ?? 0;
-                          return (
-                            <td key={col.id} className="p-2.5 text-center bg-indigo-50/20 border-l border-indigo-100/60">
+                        {/* Meter Reading Inputs */}
+                        <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                                Prev Reading ✏️
+                              </label>
                               <input
                                 type="number"
-                                value={val}
-                                onChange={(e) =>
-                                  handleCustomChargeInputChange(flat.id, col.id, Number(e.target.value))
-                                }
-                                className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-indigo-200 bg-white focus:ring-2 focus:ring-indigo-500/30 text-center text-indigo-950"
-                                placeholder={String(col.defaultAmount)}
-                                title={`${col.name} for Flat ${flat.flatNumber}`}
+                                value={prev}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value);
+                                  setDraftReadings((prevMap) => ({
+                                    ...prevMap,
+                                    [flat.id]: {
+                                      ...prevMap[flat.id],
+                                      previous: val,
+                                      current: curr,
+                                    },
+                                  }));
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs font-mono font-bold rounded-lg border bg-white border-slate-200 text-slate-800 focus:ring-2 focus:ring-amber-500/30 text-right"
                               />
-                            </td>
-                          );
-                        })}
-
-                        {/* Spacer Cell matching '+ Add Col' header button */}
-                        <td className="p-2.5 text-center text-[11px] text-slate-300 border-l border-slate-100 select-none">
-                          —
-                        </td>
-
-                        {/* Column 1: Pending Amount (Previous Month Dues) Input */}
-                        <td className="p-2.5 text-center bg-rose-50/20 border-l border-rose-100">
-                          <input
-                            type="number"
-                            min="0"
-                            value={pendingAmt}
-                            onChange={(e) => {
-                              const val = Math.max(0, Number(e.target.value) || 0);
-                              setDraftReadings((prevMap) => ({
-                                ...prevMap,
-                                [flat.id]: {
-                                  ...prevMap[flat.id],
-                                  pendingAmount: val,
-                                },
-                              }));
-                            }}
-                            className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-rose-200 bg-white focus:ring-2 focus:ring-rose-500/30 text-center text-rose-800 shadow-2xs"
-                            placeholder="0"
-                            title={`Pending money from previous month for Flat ${flat.flatNumber}`}
-                          />
-                        </td>
-
-                        {/* Column 2: Advance Amount (Credit Deduction) Input */}
-                        <td className="p-2.5 text-center bg-emerald-50/20 border-l border-emerald-100">
-                          <input
-                            type="number"
-                            min="0"
-                            value={advanceAmt}
-                            onChange={(e) => {
-                              const val = Math.max(0, Number(e.target.value) || 0);
-                              setDraftReadings((prevMap) => ({
-                                ...prevMap,
-                                [flat.id]: {
-                                  ...prevMap[flat.id],
-                                  advanceAmount: val,
-                                },
-                              }));
-                            }}
-                            className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-emerald-200 bg-white focus:ring-2 focus:ring-emerald-500/30 text-center text-emerald-800 shadow-2xs"
-                            placeholder="0"
-                            title={`Advance credit deduction for Flat ${flat.flatNumber}`}
-                          />
-                        </td>
-
-                        <td className="p-2.5 text-right font-extrabold whitespace-nowrap">
-                          <div className="text-amber-900 text-sm">
-                            ₹{netBill.toLocaleString('en-IN')}/-
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                                Curr Reading
+                              </label>
+                              <input
+                                type="number"
+                                value={curr}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value);
+                                  setDraftReadings((prevMap) => ({
+                                    ...prevMap,
+                                    [flat.id]: {
+                                      ...prevMap[flat.id],
+                                      previous: prev,
+                                      current: val,
+                                    },
+                                  }));
+                                }}
+                                className={`w-full px-2.5 py-1.5 text-xs font-mono font-bold rounded-lg border text-right ${
+                                  isInvalid
+                                    ? 'bg-rose-50 border-rose-400 text-rose-700'
+                                    : 'bg-white border-slate-200 text-slate-900 focus:ring-2 focus:ring-amber-500/30'
+                                }`}
+                              />
+                            </div>
                           </div>
-                          {(pendingAmt > 0 || advanceAmt > 0) && (
-                            <div className="text-[10px] font-mono font-medium text-slate-500 space-x-1">
-                              {pendingAmt > 0 && <span className="text-rose-600 font-bold">+{pendingAmt}</span>}
-                              {advanceAmt > 0 && <span className="text-emerald-600 font-bold">-{advanceAmt}</span>}
-                              <span className="text-slate-400">base ₹{totalAmt}</span>
+                          {isInvalid && (
+                            <div className="text-[10px] text-rose-600 font-bold bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                              ⚠️ Current reading must be ≥ {prev}
                             </div>
                           )}
-                        </td>
-                      </tr>
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-200/70 text-xs">
+                            <span className="text-slate-600">
+                              Units: <strong className="font-mono text-amber-700 font-bold">{units} u</strong> (@ ₹{rate.toFixed(1)}/u)
+                            </span>
+                            <span className="font-bold text-slate-800">
+                              Energy: <span className="font-mono font-extrabold text-slate-900">₹{energyAmt.toLocaleString('en-IN')}</span>
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Charges Breakdown */}
+                        <div className="space-y-1.5">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="bg-sky-50/60 p-2 rounded-xl border border-sky-200/70">
+                              <label className="block text-[10px] font-bold text-sky-950 truncate mb-1">
+                                {commonMeterLabel}
+                              </label>
+                              <div className="relative">
+                                <span className="absolute left-2 top-1.5 text-xs text-sky-600 font-bold">₹</span>
+                                <input
+                                  type="number"
+                                  value={commonAmt}
+                                  onChange={(e) => {
+                                    const val = Number(e.target.value);
+                                    setDraftReadings((prevMap) => ({
+                                      ...prevMap,
+                                      [flat.id]: {
+                                        ...prevMap[flat.id],
+                                        commonMeterCharges: val,
+                                      },
+                                    }));
+                                  }}
+                                  className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-sky-300 bg-white text-slate-800 text-right focus:ring-2 focus:ring-sky-500/30"
+                                />
+                              </div>
+                            </div>
+                            <div className="bg-amber-50/60 p-2 rounded-xl border border-amber-200/70">
+                              <label className="block text-[10px] font-bold text-amber-950 truncate mb-1">
+                                {maintenanceLabel}
+                              </label>
+                              <div className="relative">
+                                <span className="absolute left-2 top-1.5 text-xs text-amber-600 font-bold">₹</span>
+                                <input
+                                  type="number"
+                                  value={maintAmt}
+                                  onChange={(e) => {
+                                    const val = Number(e.target.value);
+                                    setDraftReadings((prevMap) => ({
+                                      ...prevMap,
+                                      [flat.id]: {
+                                        ...prevMap[flat.id],
+                                        maintenanceCharges: val,
+                                      },
+                                    }));
+                                  }}
+                                  className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-amber-300 bg-white text-slate-800 text-right focus:ring-2 focus:ring-amber-500/30"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Dynamic Custom Charges */}
+                          {activeCustomColumns.length > 0 && (
+                            <div className="grid grid-cols-2 gap-2">
+                              {activeCustomColumns.map((col) => {
+                                const flatCharges = draftReadings[flat.id]?.customCharges;
+                                const val = flatCharges?.[col.id] ?? flatCharges?.[col.name] ?? col.defaultAmount ?? 0;
+                                return (
+                                  <div key={col.id} className="bg-indigo-50/60 p-2 rounded-xl border border-indigo-200/70">
+                                    <label className="block text-[10px] font-bold text-indigo-950 truncate mb-1">
+                                      {col.name}
+                                    </label>
+                                    <div className="relative">
+                                      <span className="absolute left-2 top-1.5 text-xs text-indigo-600 font-bold">₹</span>
+                                      <input
+                                        type="number"
+                                        value={val}
+                                        onChange={(e) =>
+                                          handleCustomChargeInputChange(flat.id, col.id, Number(e.target.value))
+                                        }
+                                        className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-indigo-300 bg-white text-indigo-950 text-right focus:ring-2 focus:ring-indigo-500/30"
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Balance Adjustments: Pending (+ Dues) & Advance (- Credit) */}
+                        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100">
+                          <div className="bg-rose-50/70 p-2 rounded-xl border border-rose-200">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-[10px] font-bold text-rose-950 uppercase">Pending</span>
+                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-rose-200 text-rose-800">+ Dues</span>
+                            </div>
+                            <div className="relative">
+                              <span className="absolute left-2 top-1.5 text-xs text-rose-600 font-bold">₹</span>
+                              <input
+                                type="number"
+                                min="0"
+                                value={pendingAmt}
+                                onChange={(e) => {
+                                  const val = Math.max(0, Number(e.target.value) || 0);
+                                  setDraftReadings((prevMap) => ({
+                                    ...prevMap,
+                                    [flat.id]: {
+                                      ...prevMap[flat.id],
+                                      pendingAmount: val,
+                                    },
+                                  }));
+                                }}
+                                className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-rose-300 bg-white text-rose-900 text-right focus:ring-2 focus:ring-rose-500/30 shadow-2xs"
+                                placeholder="0"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="bg-emerald-50/70 p-2 rounded-xl border border-emerald-200">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-[10px] font-bold text-emerald-950 uppercase">Advance</span>
+                              <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-200 text-emerald-800">- Credit</span>
+                            </div>
+                            <div className="relative">
+                              <span className="absolute left-2 top-1.5 text-xs text-emerald-600 font-bold">₹</span>
+                              <input
+                                type="number"
+                                min="0"
+                                value={advanceAmt}
+                                onChange={(e) => {
+                                  const val = Math.max(0, Number(e.target.value) || 0);
+                                  setDraftReadings((prevMap) => ({
+                                    ...prevMap,
+                                    [flat.id]: {
+                                      ...prevMap[flat.id],
+                                      advanceAmount: val,
+                                    },
+                                  }));
+                                }}
+                                className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-emerald-300 bg-white text-emerald-900 text-right focus:ring-2 focus:ring-emerald-500/30 shadow-2xs"
+                                placeholder="0"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Card Net Payable Summary */}
+                        <div className="flex items-center justify-between pt-2 border-t border-slate-200 bg-amber-50/80 p-2.5 rounded-xl">
+                          <div>
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-950 block">
+                              Net Payable Amount:
+                            </span>
+                            {(pendingAmt > 0 || advanceAmt > 0) && (
+                              <span className="text-[10px] text-slate-500 font-mono">
+                                Base ₹{totalAmt} {pendingAmt > 0 ? `+ ₹${pendingAmt}` : ''} {advanceAmt > 0 ? `- ₹${advanceAmt}` : ''}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-base font-mono font-extrabold text-amber-950">
+                            ₹{netBill.toLocaleString('en-IN')}/-
+                          </span>
+                        </div>
+                      </div>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
+                </div>
+              </div>
+            ) : (
+              /* TABLE VIEW: Spreadsheet View with Horizontal Touch Scrolling & Sticky Flat Header */
+              <div>
+                <div className="sm:hidden px-3.5 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-900 flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <Smartphone className="w-3.5 h-3.5 text-amber-600" />
+                    <span>👉 Swipe horizontally for all 14 columns</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setReadingViewMode('cards')}
+                    className="font-bold underline text-amber-950 cursor-pointer"
+                  >
+                    Switch to Cards View 📱
+                  </button>
+                </div>
+
+                <div className="overflow-x-auto touch-pan-x -mx-1 sm:mx-0 scrollbar-thin">
+                  <table className="min-w-[1150px] w-full text-left text-xs">
+                    <thead className="bg-slate-100 text-slate-700 border-b border-slate-200 uppercase text-[10px] tracking-wider sticky top-0 z-10">
+                      <tr>
+                        <th className="p-2.5 sticky left-0 bg-slate-100 z-20 min-w-28 shadow-[2px_0_4px_rgba(0,0,0,0.06)]">
+                          Flat No.
+                        </th>
+                        <th className="p-2.5 min-w-36">Owner / Sub-Meter</th>
+                        <th className="p-2.5 w-28">
+                          <span className="flex items-center gap-1" title="Editable previous reading">
+                            Prev Reading ✏️
+                          </span>
+                        </th>
+                        <th className="p-2.5 w-28">Curr Reading</th>
+                        <th className="p-2.5 text-center">Net Units</th>
+                        <th className="p-2.5 text-right">Energy Amt</th>
+                        <th className="p-2.5 text-center min-w-36">
+                          <div className="flex flex-col items-center">
+                            <div className="flex items-center gap-1 bg-white px-2 py-0.5 rounded-lg border border-sky-300 hover:border-sky-500 focus-within:ring-2 focus-within:ring-sky-500/30">
+                              <input
+                                type="text"
+                                value={commonMeterLabel}
+                                onChange={(e) => handleUpdateCommonLabel(e.target.value)}
+                                className="w-28 text-center text-xs font-bold text-sky-900 bg-transparent focus:outline-hidden"
+                                title="Click or type to edit this field label (e.g. Common meter)"
+                              />
+                              <Edit3 className="w-3 h-3 text-sky-500 shrink-0 pointer-events-none" />
+                            </div>
+                            <span className="text-[10px] text-slate-400 mt-0.5">(₹) Amount</span>
+                          </div>
+                        </th>
+                        <th className="p-2.5 text-center min-w-32">
+                          <div className="flex flex-col items-center">
+                            <div className="flex items-center gap-1 bg-white px-2 py-0.5 rounded-lg border border-amber-300 hover:border-amber-500 focus-within:ring-2 focus-within:ring-amber-500/30">
+                              <input
+                                type="text"
+                                value={maintenanceLabel}
+                                onChange={(e) => handleUpdateMaintenanceLabel(e.target.value)}
+                                className="w-24 text-center text-xs font-bold text-amber-900 bg-transparent focus:outline-hidden"
+                                title="Click or type to edit this field label (e.g. Cleaning or Maintenance)"
+                              />
+                              <Edit3 className="w-3 h-3 text-amber-500 shrink-0 pointer-events-none" />
+                            </div>
+                            <span className="text-[10px] text-slate-400 mt-0.5">(₹) Amount</span>
+                          </div>
+                        </th>
+
+                        {/* Dynamic Custom Fee Columns */}
+                        {activeCustomColumns.map((col) => (
+                          <th key={col.id} className="p-2.5 text-center min-w-32 bg-indigo-50/50 border-l border-indigo-100">
+                            <div className="flex flex-col items-center">
+                              <div className="flex items-center gap-1 bg-white px-2 py-0.5 rounded-lg border border-indigo-300 hover:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/30">
+                                <input
+                                  type="text"
+                                  value={col.name}
+                                  onChange={(e) => handleRenameColumn(col.id, e.target.value)}
+                                  className="w-24 text-center text-xs font-bold text-indigo-950 bg-transparent focus:outline-hidden"
+                                  title="Click or type to edit this column name"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveColumn(col.id, col.name)}
+                                  className="text-slate-400 hover:text-rose-600 transition-colors p-0.5 cursor-pointer"
+                                  title={`Remove ${col.name} column`}
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                              <span className="text-[10px] text-indigo-600 mt-0.5 font-medium">(₹) Amount</span>
+                            </div>
+                          </th>
+                        ))}
+
+                        {/* Header button to quickly add column */}
+                        <th className="p-2.5 text-center w-28 bg-slate-50 border-l border-slate-200">
+                          <button
+                            type="button"
+                            id="add-column-table-header-btn"
+                            onClick={handleOpenAddColumnModal}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-800 bg-white hover:bg-indigo-50 border border-dashed border-indigo-300 hover:border-indigo-400 rounded-lg transition-all shadow-2xs whitespace-nowrap cursor-pointer"
+                            title="Add an extra fee column like Building Charge"
+                          >
+                            <Plus className="w-3 h-3 text-indigo-600" />
+                            <span>Add Col</span>
+                          </button>
+                        </th>
+
+                        {/* Column 1: Pending Amount (Previous Month Dues) */}
+                        <th className="p-2.5 text-center min-w-28 bg-rose-50/70 border-l border-rose-200">
+                          <div className="flex flex-col items-center">
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs font-bold text-rose-950">Pending</span>
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-200 text-rose-800 leading-none">+ Add</span>
+                            </div>
+                            <span className="text-[10px] text-rose-600 mt-0.5 font-medium">Prev Dues (₹)</span>
+                          </div>
+                        </th>
+
+                        {/* Column 2: Advance Amount (Credit Deduction) */}
+                        <th className="p-2.5 text-center min-w-28 bg-emerald-50/70 border-l border-emerald-200">
+                          <div className="flex flex-col items-center">
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs font-bold text-emerald-950">Advance</span>
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-200 text-emerald-800 leading-none">- Deduct</span>
+                            </div>
+                            <span className="text-[10px] text-emerald-600 mt-0.5 font-medium">Credit (₹)</span>
+                          </div>
+                        </th>
+
+                        <th className="p-2.5 text-right whitespace-nowrap min-w-28">Net Payable (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {flats.map((flat) => {
+                        const prev = draftReadings[flat.id]?.previous ?? flat.baselineReading;
+                        const curr = draftReadings[flat.id]?.current ?? prev + 100;
+                        const units = Math.max(0, curr - prev);
+                        const isInvalid = curr < prev;
+
+                        // Calculate flat's rate
+                        const rate = flat.customRatePerUnit !== undefined && flat.customRatePerUnit > 0
+                          ? flat.customRatePerUnit
+                          : previewCalculation.effectiveRatePerUnit;
+                        const energyAmt = Math.round(units * rate);
+                        const commonAmt = draftReadings[flat.id]?.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160;
+                        const maintAmt = draftReadings[flat.id]?.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110;
+
+                        // Sum all custom charges for this flat
+                        let customChargesSum = 0;
+                        activeCustomColumns.forEach((col) => {
+                          const flatCharges = draftReadings[flat.id]?.customCharges;
+                          const val = flatCharges?.[col.id] ?? flatCharges?.[col.name] ?? col.defaultAmount ?? 0;
+                          customChargesSum += Number(val) || 0;
+                        });
+
+                        const totalAmt = energyAmt + commonAmt + maintAmt + customChargesSum;
+                        const pendingAmt = draftReadings[flat.id]?.pendingAmount ?? 0;
+                        const advanceAmt = draftReadings[flat.id]?.advanceAmount ?? 0;
+                        const netBill = Math.max(0, totalAmt + pendingAmt - advanceAmt);
+
+                        return (
+                          <tr key={flat.id} className="hover:bg-slate-50/70 transition-colors">
+                            <td className="p-2.5 font-bold text-slate-900 sticky left-0 bg-white z-10 shadow-[2px_0_4px_rgba(0,0,0,0.06)]">
+                              <div className="flex items-center gap-1">
+                                <span className="inline-block px-2 py-0.5 rounded bg-slate-100 border border-slate-200 font-mono text-xs font-bold text-slate-900">
+                                  Flat {flat.flatNumber}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingFlat(flat)}
+                                  className="p-1 rounded-md text-slate-400 hover:text-amber-700 hover:bg-amber-100/60 transition-colors"
+                                  title={`Edit Flat ${flat.flatNumber}, resident name, or mobile number`}
+                                >
+                                  <Edit3 className="w-3 h-3 text-amber-600" />
+                                </button>
+                              </div>
+                            </td>
+                            <td className="p-2.5">
+                              <div className="flex items-center justify-between gap-1.5">
+                                <div>
+                                  <div className="font-semibold text-slate-800">{flat.ownerName}</div>
+                                  <div className="text-[10px] font-mono text-slate-500">
+                                    +91 {flat.phone}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingFlat(flat)}
+                                  className="text-[10px] px-1.5 py-0.5 bg-slate-100 hover:bg-amber-50 text-slate-600 hover:text-amber-800 border border-slate-200 rounded font-semibold transition-colors shrink-0"
+                                  title={`Edit Flat ${flat.flatNumber} details`}
+                                >
+                                  Edit
+                                </button>
+                              </div>
+                            </td>
+                            <td className="p-2.5">
+                              <input
+                                type="number"
+                                value={prev}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value);
+                                  setDraftReadings((prevMap) => ({
+                                    ...prevMap,
+                                    [flat.id]: {
+                                      ...prevMap[flat.id],
+                                      previous: val,
+                                      current: curr,
+                                    },
+                                  }));
+                                }}
+                                className="w-24 px-2 py-1 text-xs font-mono font-semibold rounded-lg border bg-slate-50 border-slate-200 text-slate-800 focus:bg-white focus:ring-2 focus:ring-amber-500/30"
+                                title={`Edit previous meter reading for Flat ${flat.flatNumber}`}
+                              />
+                            </td>
+                            <td className="p-2.5">
+                              <input
+                                type="number"
+                                value={curr}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value);
+                                  setDraftReadings((prevMap) => ({
+                                    ...prevMap,
+                                    [flat.id]: {
+                                      ...prevMap[flat.id],
+                                      previous: prev,
+                                      current: val,
+                                    },
+                                  }));
+                                }}
+                                className={`w-24 px-2 py-1 text-xs font-mono font-bold rounded-lg border ${
+                                  isInvalid
+                                    ? 'bg-rose-50 border-rose-400 text-rose-700'
+                                    : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:ring-2 focus:ring-amber-500/30'
+                                }`}
+                              />
+                              {isInvalid && (
+                                <span className="text-[9px] text-rose-600 block mt-0.5 font-semibold">
+                                  Must be ≥ {prev}
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-2.5 text-center font-mono font-bold text-amber-700">
+                              {units} u
+                              <span className="text-[10px] font-normal text-slate-400 block">@ ₹{rate.toFixed(1)}/u</span>
+                            </td>
+                            <td className="p-2.5 text-right font-semibold text-slate-800">
+                              ₹{energyAmt.toLocaleString('en-IN')}
+                            </td>
+                            <td className="p-2.5 text-center">
+                              <input
+                                type="number"
+                                value={commonAmt}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value);
+                                  setDraftReadings((prevMap) => ({
+                                    ...prevMap,
+                                    [flat.id]: {
+                                      ...prevMap[flat.id],
+                                      commonMeterCharges: val,
+                                    },
+                                  }));
+                                }}
+                                className="w-20 px-2 py-1 text-xs font-mono font-semibold rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500/30 text-center"
+                                placeholder="160"
+                              />
+                            </td>
+                            <td className="p-2.5 text-center">
+                              <input
+                                type="number"
+                                value={maintAmt}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value);
+                                  setDraftReadings((prevMap) => ({
+                                    ...prevMap,
+                                    [flat.id]: {
+                                      ...prevMap[flat.id],
+                                      maintenanceCharges: val,
+                                    },
+                                  }));
+                                }}
+                                className="w-20 px-2 py-1 text-xs font-mono font-semibold rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500/30 text-center"
+                                placeholder="110"
+                              />
+                            </td>
+
+                            {/* Dynamic Custom Fee Columns Inputs */}
+                            {activeCustomColumns.map((col) => {
+                              const flatCharges = draftReadings[flat.id]?.customCharges;
+                              const val = flatCharges?.[col.id] ?? flatCharges?.[col.name] ?? col.defaultAmount ?? 0;
+                              return (
+                                <td key={col.id} className="p-2.5 text-center bg-indigo-50/20 border-l border-indigo-100/60">
+                                  <input
+                                    type="number"
+                                    value={val}
+                                    onChange={(e) =>
+                                      handleCustomChargeInputChange(flat.id, col.id, Number(e.target.value))
+                                    }
+                                    className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-indigo-200 bg-white focus:ring-2 focus:ring-indigo-500/30 text-center text-indigo-950"
+                                    placeholder={String(col.defaultAmount)}
+                                    title={`${col.name} for Flat ${flat.flatNumber}`}
+                                  />
+                                </td>
+                              );
+                            })}
+
+                            {/* Spacer Cell matching '+ Add Col' header button */}
+                            <td className="p-2.5 text-center text-[11px] text-slate-300 border-l border-slate-100 select-none">
+                              —
+                            </td>
+
+                            {/* Column 1: Pending Amount (Previous Month Dues) Input */}
+                            <td className="p-2.5 text-center bg-rose-50/20 border-l border-rose-100">
+                              <input
+                                type="number"
+                                min="0"
+                                value={pendingAmt}
+                                onChange={(e) => {
+                                  const val = Math.max(0, Number(e.target.value) || 0);
+                                  setDraftReadings((prevMap) => ({
+                                    ...prevMap,
+                                    [flat.id]: {
+                                      ...prevMap[flat.id],
+                                      pendingAmount: val,
+                                    },
+                                  }));
+                                }}
+                                className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-rose-200 bg-white focus:ring-2 focus:ring-rose-500/30 text-center text-rose-800 shadow-2xs"
+                                placeholder="0"
+                                title={`Pending money from previous month for Flat ${flat.flatNumber}`}
+                              />
+                            </td>
+
+                            {/* Column 2: Advance Amount (Credit Deduction) Input */}
+                            <td className="p-2.5 text-center bg-emerald-50/20 border-l border-emerald-100">
+                              <input
+                                type="number"
+                                min="0"
+                                value={advanceAmt}
+                                onChange={(e) => {
+                                  const val = Math.max(0, Number(e.target.value) || 0);
+                                  setDraftReadings((prevMap) => ({
+                                    ...prevMap,
+                                    [flat.id]: {
+                                      ...prevMap[flat.id],
+                                      advanceAmount: val,
+                                    },
+                                  }));
+                                }}
+                                className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-emerald-200 bg-white focus:ring-2 focus:ring-emerald-500/30 text-center text-emerald-800 shadow-2xs"
+                                placeholder="0"
+                                title={`Advance credit deduction for Flat ${flat.flatNumber}`}
+                              />
+                            </td>
+
+                            <td className="p-2.5 text-right font-extrabold whitespace-nowrap">
+                              <div className="text-amber-900 text-sm">
+                                ₹{netBill.toLocaleString('en-IN')}/-
+                              </div>
+                              {(pendingAmt > 0 || advanceAmt > 0) && (
+                                <div className="text-[10px] font-mono font-medium text-slate-500 space-x-1">
+                                  {pendingAmt > 0 && <span className="text-rose-600 font-bold">+{pendingAmt}</span>}
+                                  {advanceAmt > 0 && <span className="text-emerald-600 font-bold">-{advanceAmt}</span>}
+                                  <span className="text-slate-400">base ₹{totalAmt}</span>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-end">
               <button

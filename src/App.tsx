@@ -19,7 +19,7 @@ const AppContent: React.FC = () => {
       <div
         className={
           isMobileFrame
-            ? 'max-w-md mx-auto my-4 sm:my-8 bg-white min-h-[840px] rounded-3xl shadow-2xl border-4 border-slate-800 overflow-hidden flex flex-col relative'
+            ? 'max-w-md mx-auto my-4 sm:my-8 bg-white h-[860px] max-h-[92vh] rounded-3xl shadow-2xl border-4 border-slate-800 overflow-hidden flex flex-col relative'
             : 'w-full min-h-screen flex flex-col bg-slate-100'
         }
       >
