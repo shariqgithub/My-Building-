@@ -518,16 +518,21 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </div>
 
                       {/* Committee Switcher: Switch to Secretary's Flat */}
-                      <div className="mb-2 p-2 bg-emerald-50/90 border border-emerald-200 rounded-lg">
-                        <div className="text-[11px] font-bold text-emerald-900 mb-1 flex items-center gap-1">
-                          <Home className="w-3.5 h-3.5 text-emerald-600" />
-                          Committee Resident View
+                      <div className="mb-2 p-2.5 bg-emerald-50/90 border border-emerald-200 rounded-lg">
+                        <div className="text-[11px] font-bold text-emerald-900 mb-1 flex items-center justify-between">
+                          <span className="flex items-center gap-1">
+                            <Home className="w-3.5 h-3.5 text-emerald-600" />
+                            My Registered Flats
+                          </span>
+                          <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded">
+                            {adminFlats.length} {adminFlats.length === 1 ? 'Flat' : 'Flats'}
+                          </span>
                         </div>
-                        <p className="text-[10px] text-emerald-800 mb-1.5">
-                          View your own flat's bill and statement as a resident:
+                        <p className="text-[10px] text-emerald-800 mb-2">
+                          Switch to resident view for your registered flats:
                         </p>
                         {adminFlats.length > 1 ? (
-                          <div className="space-y-1">
+                          <div className="space-y-1.5">
                             {adminFlats.map((f) => {
                               const unitShop = f.flatNumber.toLowerCase().includes('shop');
                               const unitLabel = f.flatNumber.toLowerCase().startsWith('flat') || unitShop ? f.flatNumber : `Flat ${f.flatNumber}`;
@@ -563,36 +568,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                             <span>View as {adminFlats[0]?.flatNumber ? (adminFlats[0].flatNumber.toLowerCase().startsWith('flat') ? adminFlats[0].flatNumber : `Flat ${adminFlats[0].flatNumber}`) : 'Flat View'}</span>
                           </button>
                         )}
-                      </div>
-
-                      <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider px-1 pt-1 pb-1">
-                        View Other Resident Bills (Testing)
-                      </div>
-                      <p className="text-[10px] text-slate-500 px-1 mb-1.5">
-                        Select any flat to preview how that resident views their bill:
-                      </p>
-
-                      <div className="max-h-36 overflow-y-auto space-y-0.5 pr-1">
-                        {flats.map((f) => (
-                          <button
-                            key={f.id}
-                            onClick={() => {
-                              switchToResidentView(f.id);
-                              setShowRoleMenu(false);
-                            }}
-                            className="w-full flex items-center justify-between text-xs px-2 py-1 rounded-md text-left text-slate-700 hover:bg-slate-50 transition-colors"
-                          >
-                            <span className="truncate">
-                              {f.flatNumber.toLowerCase().includes('shop') || f.flatNumber.toLowerCase().startsWith('flat') ? f.flatNumber : `Flat ${f.flatNumber}`}{' '}
-                              <span className="text-[11px] text-slate-400">({f.ownerName})</span>
-                            </span>
-                            {f.customRatePerUnit && (
-                              <span className="text-[10px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded shrink-0">
-                                ₹{f.customRatePerUnit}/u
-                              </span>
-                            )}
-                          </button>
-                        ))}
                       </div>
 
                       <div className="border-t border-slate-100 pt-1.5 mt-2 space-y-1">

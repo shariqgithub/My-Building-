@@ -2489,18 +2489,20 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   );
 
   const switchToResidentView = (targetFlatId?: string) => {
+    const adminClean = (settings.adminPhone || FIXED_ADMIN_PHONE).replace(/\D/g, '');
     let targetFlat = targetFlatId ? flats.find((f) => f.id === targetFlatId) : undefined;
     if (!targetFlat && targetFlatId) {
       targetFlat = flats.find((f) => normalizeFlatNumber(f.flatNumber) === normalizeFlatNumber(targetFlatId));
     }
     if (!targetFlat) {
       targetFlat =
+        adminFlats[0] ||
+        flats.find((f) => isPhoneMatch(f.phone, adminClean)) ||
         flats.find((f) => f.id === settings.adminFlatId || normalizeFlatNumber(f.flatNumber) === 'flat-101') ||
         flats.find((f) => isPhoneMatch(f.phone, FIXED_ADMIN_PHONE)) ||
         flats[0];
     }
 
-    const adminClean = (settings.adminPhone || FIXED_ADMIN_PHONE).replace(/\D/g, '');
     const isTargetAdminFlat = isPhoneMatch(targetFlat.phone, adminClean) || targetFlat.id === settings.adminFlatId;
 
     setAndUnlockSession({
