@@ -177,6 +177,34 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           )}
 
+          {/* Quick Testing Flat Jump in Navbar (Only for Admin / Committee Member) */}
+          {currentSession && (currentSession.role === 'admin' || currentSession.isCommitteeMember) && (
+            <div className="relative hidden lg:flex items-center">
+              <select
+                value={currentSession.role === 'resident' ? currentSession.flatId : ''}
+                onChange={(e) => {
+                  if (e.target.value) {
+                    switchToResidentView(e.target.value);
+                  }
+                }}
+                className="text-xs font-semibold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg pl-2 pr-7 py-1.5 cursor-pointer appearance-none focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                title="Testing list: Rapidly jump to any flat's resident bill"
+              >
+                <option value="">⚡ Test Any Flat...</option>
+                {flats.map((f) => {
+                  const unitShop = f.flatNumber.toLowerCase().includes('shop');
+                  const unitLabel = f.flatNumber.toLowerCase().startsWith('flat') || unitShop ? f.flatNumber : `Flat ${f.flatNumber}`;
+                  return (
+                    <option key={f.id} value={f.id}>
+                      {unitLabel} - {f.ownerName}
+                    </option>
+                  );
+                })}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-amber-700 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
+          )}
+
           {/* Cloud Sync Status Indicator */}
           <div
             className={`inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-lg border ${
@@ -458,11 +486,44 @@ export const Navbar: React.FC<NavbarProps> = ({
                               switchToAdminView();
                               setShowRoleMenu(false);
                             }}
-                            className="w-full py-1.5 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                            className="w-full py-1.5 px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs mb-2"
                           >
                             <ArrowRightLeft className="w-3.5 h-3.5" />
                             Switch to Admin Console
                           </button>
+
+                          {/* Testing List - Rapid Flat Navigation */}
+                          <div className="pt-1.5 border-t border-indigo-200/70">
+                            <div className="text-[10px] font-bold text-indigo-900 mb-1 flex items-center justify-between">
+                              <span className="flex items-center gap-1">
+                                <Zap className="w-3 h-3 text-amber-500" />
+                                Testing List (Rapid Navigation)
+                              </span>
+                              <span className="text-[9px] bg-indigo-100 text-indigo-800 font-semibold px-1 rounded">
+                                {flats.length} Flats
+                              </span>
+                            </div>
+                            <select
+                              value={currentSession.flatId}
+                              onChange={(e) => {
+                                if (e.target.value) {
+                                  switchToResidentView(e.target.value);
+                                  setShowRoleMenu(false);
+                                }
+                              }}
+                              className="w-full text-xs font-medium bg-white border border-indigo-200 rounded-md px-2 py-1 text-slate-800 cursor-pointer focus:ring-2 focus:ring-indigo-500/20"
+                            >
+                              {flats.map((f) => {
+                                const unitShop = f.flatNumber.toLowerCase().includes('shop');
+                                const unitLabel = f.flatNumber.toLowerCase().startsWith('flat') || unitShop ? f.flatNumber : `Flat ${f.flatNumber}`;
+                                return (
+                                  <option key={f.id} value={f.id}>
+                                    {unitShop ? '🏪' : '🏠'} {unitLabel} - {f.ownerName}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          </div>
                         </div>
                       )}
 
@@ -568,6 +629,40 @@ export const Navbar: React.FC<NavbarProps> = ({
                             <span>View as {adminFlats[0]?.flatNumber ? (adminFlats[0].flatNumber.toLowerCase().startsWith('flat') ? adminFlats[0].flatNumber : `Flat ${adminFlats[0].flatNumber}`) : 'Flat View'}</span>
                           </button>
                         )}
+                      </div>
+
+                      {/* Testing List - Rapid Flat Navigation */}
+                      <div className="mb-2 p-2 bg-slate-50 border border-slate-200 rounded-lg">
+                        <div className="text-[11px] font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                          <span className="flex items-center gap-1">
+                            <Zap className="w-3.5 h-3.5 text-amber-500" />
+                            Testing List (Rapid Navigation)
+                          </span>
+                          <span className="text-[10px] bg-slate-200 text-slate-700 font-semibold px-1.5 py-0.2 rounded">
+                            {flats.length} Flats
+                          </span>
+                        </div>
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              switchToResidentView(e.target.value);
+                              setShowRoleMenu(false);
+                            }
+                          }}
+                          className="w-full text-xs font-medium bg-white border border-slate-300 rounded-md px-2 py-1.5 text-slate-800 cursor-pointer focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+                        >
+                          <option value="" disabled>⚡ Move to any flat rapidly...</option>
+                          {flats.map((f) => {
+                            const unitShop = f.flatNumber.toLowerCase().includes('shop');
+                            const unitLabel = f.flatNumber.toLowerCase().startsWith('flat') || unitShop ? f.flatNumber : `Flat ${f.flatNumber}`;
+                            return (
+                              <option key={f.id} value={f.id}>
+                                {unitShop ? '🏪' : '🏠'} {unitLabel} - {f.ownerName}
+                              </option>
+                            );
+                          })}
+                        </select>
                       </div>
 
                       <div className="border-t border-slate-100 pt-1.5 mt-2 space-y-1">

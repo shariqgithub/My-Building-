@@ -247,7 +247,7 @@ export const ResidentDashboard: React.FC = () => {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-base font-bold text-slate-900">
-                Flat {flat.flatNumber} • {flat.ownerName}
+                {(flat.flatNumber.toLowerCase().startsWith('flat') || flat.flatNumber.toLowerCase().includes('shop')) ? flat.flatNumber : `Flat ${flat.flatNumber}`} • {flat.ownerName}
               </h2>
               {flat.customRatePerUnit && (
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
