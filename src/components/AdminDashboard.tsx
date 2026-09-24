@@ -960,6 +960,7 @@ export const AdminDashboard: React.FC = () => {
                 <input
                   type="number"
                   value={mainPrevReading === 0 ? '' : mainPrevReading}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => handleMainPrevReadingChange(e.target.value)}
                   placeholder="48000"
                   className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl font-mono text-slate-800 focus:ring-2 focus:ring-amber-500/30"
@@ -974,6 +975,7 @@ export const AdminDashboard: React.FC = () => {
                 <input
                   type="number"
                   value={mainCurrReading === 0 ? '' : mainCurrReading}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => handleMainCurrReadingChange(e.target.value)}
                   placeholder="50000"
                   className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl font-mono text-slate-800 focus:ring-2 focus:ring-amber-500/30 font-bold"
@@ -994,7 +996,8 @@ export const AdminDashboard: React.FC = () => {
                   <input
                     type="number"
                     value={mainUnits === 0 ? '' : mainUnits}
-                    onChange={(e) => setMainUnits(Number(e.target.value))}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => setMainUnits(e.target.value === '' ? 0 : Number(e.target.value))}
                     placeholder="2000"
                     className="w-full px-3 py-2 text-sm bg-emerald-50/50 border border-emerald-300 rounded-xl font-bold font-mono text-emerald-950 focus:ring-2 focus:ring-emerald-500/30"
                   />
@@ -1027,7 +1030,8 @@ export const AdminDashboard: React.FC = () => {
                 <input
                   type="number"
                   value={mainBillAmount === 0 ? '' : mainBillAmount}
-                  onChange={(e) => setMainBillAmount(Number(e.target.value))}
+                  onFocus={(e) => e.target.select()}
+                  onChange={(e) => setMainBillAmount(e.target.value === '' ? 0 : Number(e.target.value))}
                   placeholder="16000"
                   className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-xl font-bold font-mono focus:ring-2 focus:ring-amber-500/30 text-slate-900"
                 />
@@ -1392,9 +1396,11 @@ export const AdminDashboard: React.FC = () => {
                               </label>
                               <input
                                 type="number"
-                                value={prev}
+                                value={prev === 0 ? '' : prev}
+                                onFocus={(e) => e.target.select()}
+                                placeholder="0"
                                 onChange={(e) => {
-                                  const val = Number(e.target.value);
+                                  const val = e.target.value === '' ? 0 : Number(e.target.value);
                                   setDraftReadings((prevMap) => ({
                                     ...prevMap,
                                     [flat.id]: {
@@ -1413,9 +1419,11 @@ export const AdminDashboard: React.FC = () => {
                               </label>
                               <input
                                 type="number"
-                                value={curr}
+                                value={curr === 0 ? '' : curr}
+                                onFocus={(e) => e.target.select()}
+                                placeholder="0"
                                 onChange={(e) => {
-                                  const val = Number(e.target.value);
+                                  const val = e.target.value === '' ? 0 : Number(e.target.value);
                                   setDraftReadings((prevMap) => ({
                                     ...prevMap,
                                     [flat.id]: {
@@ -1459,9 +1467,11 @@ export const AdminDashboard: React.FC = () => {
                                 <span className="absolute left-2 top-1.5 text-xs text-sky-600 font-bold">₹</span>
                                 <input
                                   type="number"
-                                  value={commonAmt}
+                                  value={commonAmt === 0 ? '' : commonAmt}
+                                  onFocus={(e) => e.target.select()}
+                                  placeholder="0"
                                   onChange={(e) => {
-                                    const val = Number(e.target.value);
+                                    const val = e.target.value === '' ? 0 : Number(e.target.value);
                                     setDraftReadings((prevMap) => ({
                                       ...prevMap,
                                       [flat.id]: {
@@ -1482,9 +1492,11 @@ export const AdminDashboard: React.FC = () => {
                                 <span className="absolute left-2 top-1.5 text-xs text-amber-600 font-bold">₹</span>
                                 <input
                                   type="number"
-                                  value={maintAmt}
+                                  value={maintAmt === 0 ? '' : maintAmt}
+                                  onFocus={(e) => e.target.select()}
+                                  placeholder="0"
                                   onChange={(e) => {
-                                    const val = Number(e.target.value);
+                                    const val = e.target.value === '' ? 0 : Number(e.target.value);
                                     setDraftReadings((prevMap) => ({
                                       ...prevMap,
                                       [flat.id]: {
@@ -1514,9 +1526,15 @@ export const AdminDashboard: React.FC = () => {
                                       <span className="absolute left-2 top-1.5 text-xs text-indigo-600 font-bold">₹</span>
                                       <input
                                         type="number"
-                                        value={val}
+                                        value={val === 0 ? '' : val}
+                                        onFocus={(e) => e.target.select()}
+                                        placeholder="0"
                                         onChange={(e) =>
-                                          handleCustomChargeInputChange(flat.id, col.id, Number(e.target.value))
+                                          handleCustomChargeInputChange(
+                                            flat.id,
+                                            col.id,
+                                            e.target.value === '' ? 0 : Number(e.target.value)
+                                          )
                                         }
                                         className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-indigo-300 bg-white text-indigo-950 text-right focus:ring-2 focus:ring-indigo-500/30"
                                       />
@@ -1540,9 +1558,10 @@ export const AdminDashboard: React.FC = () => {
                               <input
                                 type="number"
                                 min="0"
-                                value={pendingAmt}
+                                value={pendingAmt === 0 ? '' : pendingAmt}
+                                onFocus={(e) => e.target.select()}
                                 onChange={(e) => {
-                                  const val = Math.max(0, Number(e.target.value) || 0);
+                                  const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
                                   setDraftReadings((prevMap) => ({
                                     ...prevMap,
                                     [flat.id]: {
@@ -1567,9 +1586,10 @@ export const AdminDashboard: React.FC = () => {
                               <input
                                 type="number"
                                 min="0"
-                                value={advanceAmt}
+                                value={advanceAmt === 0 ? '' : advanceAmt}
+                                onFocus={(e) => e.target.select()}
                                 onChange={(e) => {
-                                  const val = Math.max(0, Number(e.target.value) || 0);
+                                  const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
                                   setDraftReadings((prevMap) => ({
                                     ...prevMap,
                                     [flat.id]: {
@@ -1801,9 +1821,11 @@ export const AdminDashboard: React.FC = () => {
                             <td className="p-2.5">
                               <input
                                 type="number"
-                                value={prev}
+                                value={prev === 0 ? '' : prev}
+                                onFocus={(e) => e.target.select()}
+                                placeholder="0"
                                 onChange={(e) => {
-                                  const val = Number(e.target.value);
+                                  const val = e.target.value === '' ? 0 : Number(e.target.value);
                                   setDraftReadings((prevMap) => ({
                                     ...prevMap,
                                     [flat.id]: {
@@ -1820,9 +1842,11 @@ export const AdminDashboard: React.FC = () => {
                             <td className="p-2.5">
                               <input
                                 type="number"
-                                value={curr}
+                                value={curr === 0 ? '' : curr}
+                                onFocus={(e) => e.target.select()}
+                                placeholder="0"
                                 onChange={(e) => {
-                                  const val = Number(e.target.value);
+                                  const val = e.target.value === '' ? 0 : Number(e.target.value);
                                   setDraftReadings((prevMap) => ({
                                     ...prevMap,
                                     [flat.id]: {
@@ -1854,9 +1878,10 @@ export const AdminDashboard: React.FC = () => {
                             <td className="p-2.5 text-center">
                               <input
                                 type="number"
-                                value={commonAmt}
+                                value={commonAmt === 0 ? '' : commonAmt}
+                                onFocus={(e) => e.target.select()}
                                 onChange={(e) => {
-                                  const val = Number(e.target.value);
+                                  const val = e.target.value === '' ? 0 : Number(e.target.value);
                                   setDraftReadings((prevMap) => ({
                                     ...prevMap,
                                     [flat.id]: {
@@ -1866,15 +1891,16 @@ export const AdminDashboard: React.FC = () => {
                                   }));
                                 }}
                                 className="w-20 px-2 py-1 text-xs font-mono font-semibold rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500/30 text-center"
-                                placeholder="160"
+                                placeholder="0"
                               />
                             </td>
                             <td className="p-2.5 text-center">
                               <input
                                 type="number"
-                                value={maintAmt}
+                                value={maintAmt === 0 ? '' : maintAmt}
+                                onFocus={(e) => e.target.select()}
                                 onChange={(e) => {
-                                  const val = Number(e.target.value);
+                                  const val = e.target.value === '' ? 0 : Number(e.target.value);
                                   setDraftReadings((prevMap) => ({
                                     ...prevMap,
                                     [flat.id]: {
@@ -1884,7 +1910,7 @@ export const AdminDashboard: React.FC = () => {
                                   }));
                                 }}
                                 className="w-20 px-2 py-1 text-xs font-mono font-semibold rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500/30 text-center"
-                                placeholder="110"
+                                placeholder="0"
                               />
                             </td>
 
@@ -1896,12 +1922,17 @@ export const AdminDashboard: React.FC = () => {
                                 <td key={col.id} className="p-2.5 text-center bg-indigo-50/20 border-l border-indigo-100/60">
                                   <input
                                     type="number"
-                                    value={val}
+                                    value={val === 0 ? '' : val}
+                                    onFocus={(e) => e.target.select()}
                                     onChange={(e) =>
-                                      handleCustomChargeInputChange(flat.id, col.id, Number(e.target.value))
+                                      handleCustomChargeInputChange(
+                                        flat.id,
+                                        col.id,
+                                        e.target.value === '' ? 0 : Number(e.target.value)
+                                      )
                                     }
                                     className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-indigo-200 bg-white focus:ring-2 focus:ring-indigo-500/30 text-center text-indigo-950"
-                                    placeholder={String(col.defaultAmount)}
+                                    placeholder="0"
                                     title={`${col.name} for Flat ${flat.flatNumber}`}
                                   />
                                 </td>
@@ -1918,9 +1949,10 @@ export const AdminDashboard: React.FC = () => {
                               <input
                                 type="number"
                                 min="0"
-                                value={pendingAmt}
+                                value={pendingAmt === 0 ? '' : pendingAmt}
+                                onFocus={(e) => e.target.select()}
                                 onChange={(e) => {
-                                  const val = Math.max(0, Number(e.target.value) || 0);
+                                  const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
                                   setDraftReadings((prevMap) => ({
                                     ...prevMap,
                                     [flat.id]: {
@@ -1940,9 +1972,10 @@ export const AdminDashboard: React.FC = () => {
                               <input
                                 type="number"
                                 min="0"
-                                value={advanceAmt}
+                                value={advanceAmt === 0 ? '' : advanceAmt}
+                                onFocus={(e) => e.target.select()}
                                 onChange={(e) => {
-                                  const val = Math.max(0, Number(e.target.value) || 0);
+                                  const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
                                   setDraftReadings((prevMap) => ({
                                     ...prevMap,
                                     [flat.id]: {
@@ -2762,6 +2795,7 @@ export const AdminDashboard: React.FC = () => {
                 <input
                   type="number"
                   value={settings.defaultRatePerUnit}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => updateSettings({ defaultRatePerUnit: Number(e.target.value) })}
                   className="w-20 px-2.5 py-1 text-xs font-bold font-mono bg-slate-50 border border-slate-200 rounded-lg"
                   step="0.5"
@@ -2812,6 +2846,7 @@ export const AdminDashboard: React.FC = () => {
                       <input
                         type="number"
                         value={currentRate}
+                        onFocus={(e) => e.target.select()}
                         onChange={(e) => {
                           const val = Number(e.target.value);
                           updateFlatCustomRate(flat.id, val);
@@ -2943,6 +2978,7 @@ export const AdminDashboard: React.FC = () => {
                     <input
                       type="number"
                       value={settings.defaultCommonMeterCharges ?? 160}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => {
                         const val = Math.max(0, Number(e.target.value));
                         if (autoApplyCharges) {
@@ -3054,6 +3090,7 @@ export const AdminDashboard: React.FC = () => {
                     <input
                       type="number"
                       value={settings.defaultMaintenanceCharges ?? 110}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => {
                         const val = Math.max(0, Number(e.target.value));
                         if (autoApplyCharges) {
@@ -3785,7 +3822,8 @@ export const AdminDashboard: React.FC = () => {
                     </span>
                     <input
                       type="number"
-                      value={paymentAmountInput}
+                      value={paymentAmountInput === '0' ? '' : paymentAmountInput}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => setPaymentAmountInput(e.target.value)}
                       placeholder="Enter amount paid"
                       className="w-full pl-8 pr-3 py-2 bg-white border-2 border-slate-200 focus:border-emerald-500 rounded-xl text-base font-bold font-mono text-slate-900 focus:outline-none"
@@ -4043,8 +4081,9 @@ export const AdminDashboard: React.FC = () => {
                     type="number"
                     min="0"
                     step="1"
-                    value={newColumnAmount}
-                    onChange={(e) => setNewColumnAmount(Math.max(0, Number(e.target.value)))}
+                    value={newColumnAmount === 0 ? '' : newColumnAmount}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => setNewColumnAmount(e.target.value === '' ? 0 : Math.max(0, Number(e.target.value)))}
                     className="w-full pl-7 pr-3 py-2 text-sm bg-slate-50 focus:bg-white border border-slate-300 focus:border-indigo-500 rounded-xl focus:ring-2 focus:ring-indigo-500/20 font-mono font-bold text-slate-900"
                     placeholder="100"
                   />

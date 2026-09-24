@@ -256,7 +256,7 @@ export const BuildingExpensesTracker: React.FC = () => {
     setEditingExpenseId(null);
     setCategory(presetCategory || 'electricity_bill');
     setTitle(presetTitle || (presetCategory ? CATEGORY_CONFIG[presetCategory]?.label : ''));
-    setAmount(presetAmount !== undefined ? String(presetAmount) : '');
+    setAmount(presetAmount !== undefined && presetAmount > 0 ? String(presetAmount) : '');
     setDate(new Date().toISOString().split('T')[0]);
     setPaidTo('');
     setPaymentMethod('UPI');
@@ -505,7 +505,7 @@ export const BuildingExpensesTracker: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
-                  setCustomCollectionInput(String(effectiveCollection));
+                  setCustomCollectionInput(effectiveCollection > 0 ? String(effectiveCollection) : '');
                   setIsEditingCollection(!isEditingCollection);
                 }}
                 className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
@@ -525,7 +525,8 @@ export const BuildingExpensesTracker: React.FC = () => {
                     <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span>
                     <input
                       type="number"
-                      value={customCollectionInput}
+                      value={customCollectionInput === '0' ? '' : customCollectionInput}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => setCustomCollectionInput(e.target.value)}
                       placeholder="e.g. 15400"
                       className="w-full pl-6 pr-2 py-1 text-xs font-bold border border-slate-300 rounded-lg bg-white focus:outline-emerald-500"
@@ -1091,7 +1092,8 @@ export const BuildingExpensesTracker: React.FC = () => {
                       step="any"
                       required
                       min="1"
-                      value={amount}
+                      value={amount === '0' ? '' : amount}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => setAmount(e.target.value)}
                       placeholder="e.g. 14200"
                       className="w-full pl-7 pr-3 py-2 text-xs font-bold border border-slate-300 rounded-xl bg-white focus:outline-emerald-500"

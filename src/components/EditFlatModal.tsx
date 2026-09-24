@@ -283,7 +283,8 @@ export const EditFlatModal: React.FC<EditFlatModalProps> = ({
               <input
                 type="number"
                 step="0.5"
-                value={customRate}
+                value={customRate === '0' ? '' : customRate}
+                onFocus={(e) => e.target.select()}
                 onChange={(e) => setCustomRate(e.target.value)}
                 placeholder="Leave blank for auto"
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-700 font-mono text-xs focus:bg-white focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
