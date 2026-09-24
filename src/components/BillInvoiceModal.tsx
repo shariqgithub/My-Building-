@@ -51,8 +51,9 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
       ? Math.round(reading.unitsConsumed * flat.customRatePerUnit)
       : (reading.calculatedAmount ?? Math.round(reading.unitsConsumed * effectiveRate));
 
-  const commonChg = reading.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160;
-  const maintChg = reading.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110;
+  const isShopUnit = (flat?.flatNumber || reading.flatNumber || '').toLowerCase().includes('shop') || (flat?.id || reading.flatId || '').toLowerCase().includes('shop');
+  const commonChg = reading.commonMeterCharges !== undefined ? reading.commonMeterCharges : (isShopUnit ? 0 : (settings.defaultCommonMeterCharges ?? 160));
+  const maintChg = reading.maintenanceCharges !== undefined ? reading.maintenanceCharges : (isShopUnit ? 0 : (settings.defaultMaintenanceCharges ?? 110));
 
   let customSum = 0;
   if (reading.customCharges) {
@@ -155,14 +156,14 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
       <span>Electricity / Energy (${reading.unitsConsumed} units @ ₹${effectiveRate}/u):</span>
       <span style="font-weight: 600;">₹${effectiveEnergyAmount.toLocaleString('en-IN')}/-</span>
     </div>
-    <div class="charge-row">
+    ${commonChg > 0 ? `<div class="charge-row">
       <span>${reading.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light'}:</span>
       <span style="font-weight: 600;">₹${commonChg.toLocaleString('en-IN')}/-</span>
-    </div>
-    <div class="charge-row">
+    </div>` : ''}
+    ${maintChg > 0 ? `<div class="charge-row">
       <span>${reading.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning'}:</span>
       <span style="font-weight: 600;">₹${maintChg.toLocaleString('en-IN')}/-</span>
-    </div>
+    </div>` : ''}
     ${cycle.customColumns?.map(col => {
       const val = reading.customCharges?.[col.id] ?? reading.customCharges?.[col.name] ?? col.defaultAmount ?? 0;
       return `<div class="charge-row"><span>${col.name}:</span><span style="font-weight: 600;">₹${Number(val).toLocaleString('en-IN')}/-</span></div>`;
@@ -466,14 +467,18 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
               </span>
               <span className="font-bold">₹{effectiveEnergyAmount.toLocaleString('en-IN')}/-</span>
             </div>
-            <div className="flex justify-between text-slate-700 text-xs">
-              <span>{reading.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light'}</span>
-              <span className="font-semibold">₹{(reading.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160).toLocaleString('en-IN')}/-</span>
-            </div>
-            <div className="flex justify-between text-slate-700 text-xs">
-              <span>{reading.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning'}</span>
-              <span className="font-semibold">₹{(reading.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110).toLocaleString('en-IN')}/-</span>
-            </div>
+            {commonChg > 0 && (
+              <div className="flex justify-between text-slate-700 text-xs">
+                <span>{reading.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light'}</span>
+                <span className="font-semibold">₹{commonChg.toLocaleString('en-IN')}/-</span>
+              </div>
+            )}
+            {maintChg > 0 && (
+              <div className="flex justify-between text-slate-700 text-xs">
+                <span>{reading.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning'}</span>
+                <span className="font-semibold">₹{maintChg.toLocaleString('en-IN')}/-</span>
+              </div>
+            )}
 
             {/* Custom Fee Columns */}
             {cycle.customColumns && cycle.customColumns.length > 0 &&

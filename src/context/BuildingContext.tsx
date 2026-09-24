@@ -182,8 +182,9 @@ export function syncCycleBalances(allCycles: BillingCycle[]): BillingCycle[] {
     const updatedReadings = cycle.readings.map((r) => {
       // 1. Calculate current month bill (energy + common + maintenance + custom charges)
       const energy = r.calculatedAmount ?? (r.unitsConsumed * r.ratePerUnit);
-      const common = r.commonMeterCharges ?? 160;
-      const maint = r.maintenanceCharges ?? 110;
+      const isShop = (r.flatNumber || '').toLowerCase().includes('shop') || (r.flatId || '').toLowerCase().includes('shop');
+      const common = r.commonMeterCharges !== undefined ? r.commonMeterCharges : (isShop ? 0 : 160);
+      const maint = r.maintenanceCharges !== undefined ? r.maintenanceCharges : (isShop ? 0 : 110);
       let customSum = 0;
       if (r.customCharges) {
         Object.values(r.customCharges).forEach((val) => {
@@ -250,6 +251,8 @@ export function syncCycleBalances(allCycles: BillingCycle[]): BillingCycle[] {
 
       return {
         ...r,
+        commonMeterCharges: common,
+        maintenanceCharges: maint,
         totalBillAmount: currentMonthBill,
         pendingAmount: pendingAmt,
         advanceAmount: advanceAmt,
@@ -367,7 +370,7 @@ export const deduplicateFlatsAndCycles = (
 
     for (const f of groupFlats) {
       let score = 0;
-      if (f.id === `flat-${key.replace('flat-', '')}` || f.id === key) score += 5;
+      if (f.id === `flat-${key.replace('flat-', '')}` || f.id === key || normalizeFlatNumber(f.id) === key) score += 5;
       if (f.pin && f.pin.trim().length >= 4) score += 3;
       if (f.phone && f.phone.includes('8077649394')) score += 3;
       if (f.ownerName && !f.ownerName.toLowerCase().includes('owner') && !f.ownerName.toLowerCase().includes('resident')) score += 3;
@@ -422,10 +425,10 @@ export const deduplicateFlatsAndCycles = (
 
     for (const r of c.readings) {
       let canonicalId = reassignedMap[r.flatId] || r.flatId;
-      let targetFlat = cleanedFlats.find((f) => f.id === canonicalId);
+      let targetFlat = cleanedFlats.find((f) => f.id === canonicalId || normalizeFlatNumber(f.id) === normalizeFlatNumber(canonicalId));
       if (!targetFlat) {
         const norm = normalizeFlatNumber(r.flatNumber || r.flatId);
-        targetFlat = cleanedFlats.find((f) => normalizeFlatNumber(f.flatNumber) === norm || f.id === norm);
+        targetFlat = cleanedFlats.find((f) => normalizeFlatNumber(f.flatNumber) === norm || normalizeFlatNumber(f.id) === norm);
       }
 
       // If no valid flat exists in cleanedFlats, discard phantom/orphan reading
@@ -466,8 +469,9 @@ export const deduplicateFlatsAndCycles = (
       if (!readingMap.has(f.id)) {
         const prev = f.baselineReading || 0;
         const rate = f.customRatePerUnit || c.effectiveRatePerUnit || 9;
-        const commonChg = c.readings[0]?.commonMeterCharges ?? 160;
-        const maintChg = c.readings[0]?.maintenanceCharges ?? 110;
+        const isShopUnit = f.flatNumber.toLowerCase().includes('shop') || f.id.toLowerCase().includes('shop');
+        const commonChg = isShopUnit ? 0 : (c.readings[0]?.commonMeterCharges ?? 160);
+        const maintChg = isShopUnit ? 0 : (c.readings[0]?.maintenanceCharges ?? 110);
         const total = commonChg + maintChg;
         readingMap.set(f.id, {
           flatId: f.id,
@@ -498,8 +502,9 @@ export const deduplicateFlatsAndCycles = (
         if (f.customRatePerUnit !== undefined && f.customRatePerUnit > 0) {
           const rate = f.customRatePerUnit;
           const energy = Math.round(r.unitsConsumed * rate);
-          const common = r.commonMeterCharges ?? 160;
-          const maint = r.maintenanceCharges ?? 110;
+          const isShopUnit = f.flatNumber.toLowerCase().includes('shop') || f.id.toLowerCase().includes('shop');
+          const common = r.commonMeterCharges !== undefined ? r.commonMeterCharges : (isShopUnit ? 0 : 160);
+          const maint = r.maintenanceCharges !== undefined ? r.maintenanceCharges : (isShopUnit ? 0 : 110);
           let customSum = 0;
           if (r.customCharges) {
             Object.values(r.customCharges).forEach((val) => {
@@ -1359,21 +1364,25 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }));
 
     if (autoApplyToCycles) {
-      setCycles((prev) =>
-        prev.map((c) => {
+      let finalUpdatedCycles: BillingCycle[] = [];
+      setCycles((prev) => {
+        const mapped = prev.map((c) => {
           const updatedReadings = c.readings.map((r) => {
-            const commonCharges =
-              params.commonMeterCharges !== undefined
-                ? params.commonMeterCharges
-                : (r.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160);
+            const isShop = (r.flatNumber || '').toLowerCase().includes('shop') || (r.flatId || '').toLowerCase().includes('shop');
+            const commonCharges = isShop && (r.commonMeterCharges === 0 || params.commonMeterCharges === undefined)
+              ? 0
+              : (params.commonMeterCharges !== undefined
+                  ? params.commonMeterCharges
+                  : (r.commonMeterCharges ?? (isShop ? 0 : (settings.defaultCommonMeterCharges ?? 160))));
             const commonLabel =
               params.commonMeterLabel !== undefined
                 ? params.commonMeterLabel
                 : (r.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light');
-            const maintCharges =
-              params.maintenanceCharges !== undefined
-                ? params.maintenanceCharges
-                : (r.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110);
+            const maintCharges = isShop && (r.maintenanceCharges === 0 || params.maintenanceCharges === undefined)
+              ? 0
+              : (params.maintenanceCharges !== undefined
+                  ? params.maintenanceCharges
+                  : (r.maintenanceCharges ?? (isShop ? 0 : (settings.defaultMaintenanceCharges ?? 110))));
             const maintLabel =
               params.maintenanceLabel !== undefined
                 ? params.maintenanceLabel
@@ -1398,19 +1407,18 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             };
           });
 
-          const totalBilled = updatedReadings.reduce((acc, r) => acc + r.totalBillAmount, 0);
-          const totalCollected = updatedReadings
-            .filter((r) => r.paymentStatus === 'paid')
-            .reduce((acc, r) => acc + (r.paidAmount || r.totalBillAmount), 0);
-
           return {
             ...c,
             readings: updatedReadings,
-            totalBilledAmount: totalBilled,
-            totalCollectedAmount: totalCollected,
           };
-        })
-      );
+        });
+        finalUpdatedCycles = syncCycleBalances(mapped);
+        return finalUpdatedCycles;
+      });
+
+      if (finalUpdatedCycles.length > 0) {
+        saveToCloud(undefined, undefined, finalUpdatedCycles);
+      }
     }
 
     addNotification(
@@ -1732,8 +1740,9 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           ? f.customRatePerUnit
           : settings.defaultRatePerUnit;
       const energy = units * rate;
-      const common = settings.defaultCommonMeterCharges ?? 160;
-      const maint = settings.defaultMaintenanceCharges ?? 110;
+      const isShop = f.flatNumber.toLowerCase().includes('shop') || f.id.toLowerCase().includes('shop');
+      const common = isShop ? 0 : (settings.defaultCommonMeterCharges ?? 160);
+      const maint = isShop ? 0 : (settings.defaultMaintenanceCharges ?? 110);
 
       const customCharges: Record<string, number> = {};
       let customSum = 0;

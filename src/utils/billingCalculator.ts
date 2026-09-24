@@ -59,13 +59,14 @@ export function computeMonthlyBills(params: ComputeBillParams): {
       ? r.advanceAmount
       : (r.previousBalance && r.previousBalance < 0 ? Math.abs(r.previousBalance) : 0);
 
+    const isShopR = (r.flatId || '').toLowerCase().includes('shop');
     flatDataMap.set(r.flatId, {
       previous: r.previousReading,
       current: r.currentReading,
       units,
-      maintenanceCharges: r.maintenanceCharges ?? 110,
+      maintenanceCharges: r.maintenanceCharges !== undefined ? r.maintenanceCharges : (isShopR ? 0 : 110),
       maintenanceLabel: r.maintenanceLabel || 'Cleaning',
-      commonMeterCharges: r.commonMeterCharges ?? 160,
+      commonMeterCharges: r.commonMeterCharges !== undefined ? r.commonMeterCharges : (isShopR ? 0 : 160),
       commonMeterLabel: r.commonMeterLabel || 'Water & stairs light',
       customCharges: r.customCharges || {},
       pendingAmount: pending,
@@ -82,13 +83,14 @@ export function computeMonthlyBills(params: ComputeBillParams): {
   let totalBilledAmount = 0;
 
   const buildEntry = (f: FlatInfo, rate: number): FlatReadingEntry => {
+    const isShopF = (f.flatNumber || '').toLowerCase().includes('shop') || (f.id || '').toLowerCase().includes('shop');
     const data = flatDataMap.get(f.id) || {
       previous: 0,
       current: 0,
       units: 0,
-      maintenanceCharges: 110,
+      maintenanceCharges: isShopF ? 0 : 110,
       maintenanceLabel: 'Cleaning',
-      commonMeterCharges: 160,
+      commonMeterCharges: isShopF ? 0 : 160,
       commonMeterLabel: 'Water & stairs light',
       customCharges: {},
       pendingAmount: 0,
@@ -283,9 +285,9 @@ export function generateWhatsAppBillMessage(params: {
     currentReading,
     unitsConsumed,
     calculatedAmount,
-    commonMeterCharges = 160,
+    commonMeterCharges,
     commonMeterLabel = 'Water & stairs light',
-    maintenanceCharges = 110,
+    maintenanceCharges,
     maintenanceLabel = 'Cleaning',
     customColumns = [],
     customCharges = {},
@@ -296,12 +298,22 @@ export function generateWhatsAppBillMessage(params: {
     netPayableAmount,
   } = params;
 
+  const isShop = flatNumber.toLowerCase().includes('shop');
+  const finalCommon = commonMeterCharges !== undefined ? commonMeterCharges : (isShop ? 0 : 160);
+  const finalMaint = maintenanceCharges !== undefined ? maintenanceCharges : (isShop ? 0 : 110);
+
   // Format flat display e.g. "F-103"
   const flatDisplay = flatNumber.toUpperCase().startsWith('F-') ? flatNumber : `F-${flatNumber}`;
 
   // Lines for common area & maintenance
-  const commonMeterLine = `${commonMeterLabel} - *${commonMeterCharges}/-*`;
-  const maintenanceLine = `${maintenanceLabel} - *${maintenanceCharges}/-*`;
+  const chargeLines: string[] = [];
+  if (finalCommon > 0) {
+    chargeLines.push(`${commonMeterLabel} - *${finalCommon}/-*`);
+  }
+  if (finalMaint > 0) {
+    chargeLines.push(`${maintenanceLabel} - *${finalMaint}/-*`);
+  }
+  const commonAreaBlock = chargeLines.length > 0 ? `\n${chargeLines.join('\n')}` : '';
 
   // Dynamic custom fee columns (e.g. Building Charge - *200/-*)
   const customLines: string[] = [];
@@ -349,9 +361,7 @@ export function generateWhatsAppBillMessage(params: {
 Previous reading - *${previousReading}*
 Current reading - *${currentReading}*
 Total unit - *${unitsConsumed}*
-Amount - *${calculatedAmount}/-*
-${commonMeterLine}
-${maintenanceLine}${customFeeBlock}${adjustmentBlock}
+Amount - *${calculatedAmount}/-*${commonAreaBlock}${customFeeBlock}${adjustmentBlock}
 ${finalTotalLine}${dueDateLine}`;
 }
 

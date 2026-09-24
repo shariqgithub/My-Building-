@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useBuilding } from '../context/BuildingContext';
+import { useBuilding, normalizeFlatNumber } from '../context/BuildingContext';
 import { UpiPaymentModal } from './UpiPaymentModal';
 import { BillInvoiceModal } from './BillInvoiceModal';
 import { CATEGORY_CONFIG } from './BuildingExpensesTracker';
@@ -12,6 +12,7 @@ import {
   Clock,
   FileText,
   QrCode,
+  Download,
   Share2,
   Calendar,
   Activity,
@@ -76,59 +77,76 @@ export const ResidentDashboard: React.FC = () => {
   const [pinChangeError, setPinChangeError] = useState('');
   const [pinChangeSuccess, setPinChangeSuccess] = useState('');
 
-  // Find flat details: resilient matching by id, or by flatNumber
+  // Find flat details: resilient matching by id, or by flatNumber (including shops -2 vs Shops -02)
   const flat = useMemo(() => {
     if (currentSession?.flatId) {
-      const foundById = flats.find((f) => f.id === currentSession.flatId);
+      const foundById = flats.find((f) => f.id === currentSession.flatId || normalizeFlatNumber(f.id) === normalizeFlatNumber(currentSession.flatId));
       if (foundById) return foundById;
     }
     if (currentSession?.flatNumber) {
-      const cleanNum = currentSession.flatNumber.trim().toLowerCase();
-      const foundByNum = flats.find((f) => f.flatNumber.trim().toLowerCase() === cleanNum);
+      const cleanNum = normalizeFlatNumber(currentSession.flatNumber);
+      const foundByNum = flats.find((f) => normalizeFlatNumber(f.flatNumber) === cleanNum || normalizeFlatNumber(f.id) === cleanNum);
       if (foundByNum) return foundByNum;
     }
     return flats[0];
   }, [flats, currentSession?.flatId, currentSession?.flatNumber]);
 
-  // Resilient activeReading calculation so no unit ever shows blank
+  // Resilient activeReading calculation so no unit ever shows blank or incorrect charges
   const activeReading = useMemo(() => {
     if (!activeCycle || !flat) return undefined;
-    const found = activeCycle.readings.find((r) => r.flatId === flat.id || r.flatNumber === flat.flatNumber);
+    const flatNorm = normalizeFlatNumber(flat.flatNumber || flat.id);
+    const found = activeCycle.readings.find(
+      (r) =>
+        r.flatId === flat.id ||
+        r.flatNumber === flat.flatNumber ||
+        normalizeFlatNumber(r.flatId) === flatNorm ||
+        normalizeFlatNumber(r.flatNumber) === flatNorm
+    );
+    const isShop = flat.flatNumber.toLowerCase().includes('shop') || flat.id.toLowerCase().includes('shop');
+
     if (found) {
-      if (flat.customRatePerUnit !== undefined && flat.customRatePerUnit > 0) {
-        const rate = flat.customRatePerUnit;
-        const energy = Math.round(found.unitsConsumed * rate);
-        const common = found.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160;
-        const maint = found.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110;
-        let customSum = 0;
-        if (found.customCharges) {
-          Object.values(found.customCharges).forEach((val) => {
-            customSum += Number(val) || 0;
-          });
-        }
-        const total = energy + common + maint + customSum;
-        const pending = found.pendingAmount ?? 0;
-        const advance = found.advanceAmount ?? 0;
-        const net = Math.max(0, total + pending - advance);
-        const remaining = found.paidAmount !== undefined ? net - found.paidAmount : net;
-        return {
-          ...found,
-          ratePerUnit: rate,
-          calculatedAmount: energy,
-          totalBillAmount: total,
-          netPayableAmount: net,
-          remainingBalance: remaining > 0 ? remaining : 0,
-          advancePaid: remaining < 0 ? Math.abs(remaining) : 0,
-        };
+      const rate = flat.customRatePerUnit !== undefined && flat.customRatePerUnit > 0
+        ? flat.customRatePerUnit
+        : (found.ratePerUnit || activeCycle.effectiveRatePerUnit || settings.defaultRatePerUnit || 9);
+      const energy = Math.round(found.unitsConsumed * rate);
+
+      // If commonMeterCharges or maintenanceCharges were explicitly set (including 0 when excluded), use that
+      const common = found.commonMeterCharges !== undefined
+        ? found.commonMeterCharges
+        : (isShop ? 0 : (settings.defaultCommonMeterCharges ?? 160));
+      const maint = found.maintenanceCharges !== undefined
+        ? found.maintenanceCharges
+        : (isShop ? 0 : (settings.defaultMaintenanceCharges ?? 110));
+
+      let customSum = 0;
+      if (found.customCharges) {
+        Object.values(found.customCharges).forEach((val) => {
+          customSum += Number(val) || 0;
+        });
       }
-      return found;
+      const total = energy + common + maint + customSum;
+      const pending = found.pendingAmount ?? 0;
+      const advance = found.advanceAmount ?? 0;
+      const net = Math.max(0, total + pending - advance);
+      const remaining = found.paidAmount !== undefined ? net - found.paidAmount : net;
+      return {
+        ...found,
+        ratePerUnit: rate,
+        calculatedAmount: energy,
+        commonMeterCharges: common,
+        maintenanceCharges: maint,
+        totalBillAmount: total,
+        netPayableAmount: net,
+        remainingBalance: remaining > 0 ? remaining : 0,
+        advancePaid: remaining < 0 ? Math.abs(remaining) : 0,
+      };
     }
 
     // Resilient fallback reading if cycle is missing an entry
     const prev = flat.baselineReading || 0;
     const rate = flat.customRatePerUnit || activeCycle.effectiveRatePerUnit || settings.defaultRatePerUnit || 9;
-    const commonChg = activeCycle.readings[0]?.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160;
-    const maintChg = activeCycle.readings[0]?.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110;
+    const commonChg = isShop ? 0 : (activeCycle.readings[0]?.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160);
+    const maintChg = isShop ? 0 : (activeCycle.readings[0]?.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110);
     const total = commonChg + maintChg;
     return {
       flatId: flat.id,
@@ -512,14 +530,33 @@ export const ResidentDashboard: React.FC = () => {
                 <span>Electricity / Energy Amount ({activeReading.unitsConsumed} Units @ ₹{activeReading.ratePerUnit}/u)</span>
                 <span className="font-semibold text-slate-900">₹{activeReading.calculatedAmount.toLocaleString('en-IN')}/-</span>
               </div>
-              <div className="flex justify-between text-slate-700">
-                <span>{activeReading.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light'}</span>
-                <span className="font-semibold text-slate-900">₹{(activeReading.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160).toLocaleString('en-IN')}/-</span>
-              </div>
-              <div className="flex justify-between text-slate-700">
-                <span>{activeReading.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning'}</span>
-                <span className="font-semibold text-slate-900">₹{(activeReading.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110).toLocaleString('en-IN')}/-</span>
-              </div>
+              {((activeReading.commonMeterCharges ?? 0) > 0) && (
+                <div className="flex justify-between text-slate-700">
+                  <span>{activeReading.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light'}</span>
+                  <span className="font-semibold text-slate-900">₹{activeReading.commonMeterCharges!.toLocaleString('en-IN')}/-</span>
+                </div>
+              )}
+              {((activeReading.maintenanceCharges ?? 0) > 0) && (
+                <div className="flex justify-between text-slate-700">
+                  <span>{activeReading.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning'}</span>
+                  <span className="font-semibold text-slate-900">₹{activeReading.maintenanceCharges!.toLocaleString('en-IN')}/-</span>
+                </div>
+              )}
+
+              {/* Dynamic Custom Charges */}
+              {activeReading.customCharges &&
+                Object.entries(activeReading.customCharges).map(([key, val]) => {
+                  const numVal = Number(val) || 0;
+                  if (numVal <= 0) return null;
+                  const colMatch = activeCycle.customColumns?.find((c) => c.id === key || c.name === key);
+                  const label = colMatch ? colMatch.name : key;
+                  return (
+                    <div key={key} className="flex justify-between text-slate-700">
+                      <span>{label}</span>
+                      <span className="font-semibold text-slate-900">₹{numVal.toLocaleString('en-IN')}/-</span>
+                    </div>
+                  );
+                })}
 
               <div className="border-t border-slate-200 pt-1.5 flex justify-between text-slate-700 font-medium">
                 <span>Current Month Total Bill:</span>
@@ -602,14 +639,25 @@ export const ResidentDashboard: React.FC = () => {
             {/* Action Buttons */}
             <div className="mt-4 flex flex-wrap gap-2.5">
               {activeReading.paymentStatus !== 'paid' && (
-                <button
-                  type="button"
-                  onClick={() => setShowUpiModal(true)}
-                  className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold rounded-xl flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer"
-                >
-                  <QrCode className="w-4 h-4" />
-                  Pay via UPI {settings.upiQrCodeUrl ? '(Scan Society QR)' : '(GPay / PhonePe)'}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowUpiModal(true)}
+                    className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-semibold rounded-xl flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer min-w-44"
+                  >
+                    <QrCode className="w-4 h-4" />
+                    Pay via UPI (Scan or Download QR)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowUpiModal(true)}
+                    className="py-2.5 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs sm:text-sm font-semibold rounded-xl flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                    title="Download society QR code to phone gallery"
+                  >
+                    <Download className="w-4 h-4 text-emerald-600" />
+                    <span>Download QR</span>
+                  </button>
+                </>
               )}
 
               <button
@@ -618,7 +666,7 @@ export const ResidentDashboard: React.FC = () => {
                   setSelectedCycleForInvoice(activeCycle);
                   setShowInvoiceModal(true);
                 }}
-                className="flex-1 py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-semibold rounded-xl flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer"
+                className="flex-1 py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-semibold rounded-xl flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer min-w-40"
               >
                 <FileText className="w-4 h-4" />
                 View Bill Receipt / PDF

@@ -169,12 +169,13 @@ export const AdminDashboard: React.FC = () => {
             charges[col.id] = col.defaultAmount;
           }
         });
+        const isShopR = (r.flatNumber || '').toLowerCase().includes('shop') || (r.flatId || '').toLowerCase().includes('shop');
         map[r.flatId] = {
           current: r.currentReading,
           previous: r.previousReading,
-          commonMeterCharges: r.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160,
+          commonMeterCharges: r.commonMeterCharges !== undefined ? r.commonMeterCharges : (isShopR ? 0 : (settings.defaultCommonMeterCharges ?? 160)),
           commonMeterLabel: r.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light',
-          maintenanceCharges: r.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110,
+          maintenanceCharges: r.maintenanceCharges !== undefined ? r.maintenanceCharges : (isShopR ? 0 : (settings.defaultMaintenanceCharges ?? 110)),
           maintenanceLabel: r.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning',
           customCharges: charges,
           pendingAmount: r.pendingAmount ?? (r.previousBalance && r.previousBalance > 0 ? r.previousBalance : 0),
@@ -187,12 +188,13 @@ export const AdminDashboard: React.FC = () => {
         cols.forEach((col) => {
           charges[col.id] = col.defaultAmount;
         });
+        const isShopF = (f.flatNumber || '').toLowerCase().includes('shop') || f.id.toLowerCase().includes('shop');
         map[f.id] = {
           current: f.baselineReading + 100,
           previous: f.baselineReading,
-          commonMeterCharges: settings.defaultCommonMeterCharges ?? 160,
+          commonMeterCharges: isShopF ? 0 : (settings.defaultCommonMeterCharges ?? 160),
           commonMeterLabel: settings.defaultCommonMeterLabel || 'Water & stairs light',
-          maintenanceCharges: settings.defaultMaintenanceCharges ?? 110,
+          maintenanceCharges: isShopF ? 0 : (settings.defaultMaintenanceCharges ?? 110),
           maintenanceLabel: settings.defaultMaintenanceLabel || 'Cleaning',
           customCharges: charges,
           pendingAmount: 0,
@@ -311,12 +313,13 @@ export const AdminDashboard: React.FC = () => {
         }
       });
 
+      const isShopR = (r.flatNumber || '').toLowerCase().includes('shop') || (r.flatId || '').toLowerCase().includes('shop');
       map[r.flatId] = {
         current: r.currentReading,
         previous: r.previousReading,
-        commonMeterCharges: r.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160,
+        commonMeterCharges: r.commonMeterCharges !== undefined ? r.commonMeterCharges : (isShopR ? 0 : (settings.defaultCommonMeterCharges ?? 160)),
         commonMeterLabel: r.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light',
-        maintenanceCharges: r.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110,
+        maintenanceCharges: r.maintenanceCharges !== undefined ? r.maintenanceCharges : (isShopR ? 0 : (settings.defaultMaintenanceCharges ?? 110)),
         maintenanceLabel: r.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning',
         customCharges: charges,
         pendingAmount: r.pendingAmount ?? (r.previousBalance && r.previousBalance > 0 ? r.previousBalance : 0),
@@ -477,29 +480,45 @@ export const AdminDashboard: React.FC = () => {
     calculationMode: settings.calculationMode,
     defaultRatePerUnit: settings.defaultRatePerUnit,
     customColumns: activeCustomColumns,
-    readings: flats.map((f) => ({
-      flatId: f.id,
-      previousReading: draftReadings[f.id]?.previous ?? f.baselineReading,
-      currentReading: draftReadings[f.id]?.current ?? f.baselineReading + 100,
-      maintenanceCharges: draftReadings[f.id]?.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110,
-      maintenanceLabel: draftReadings[f.id]?.maintenanceLabel || maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning',
-      commonMeterCharges: draftReadings[f.id]?.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160,
-      commonMeterLabel: draftReadings[f.id]?.commonMeterLabel || commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light',
-      customCharges: draftReadings[f.id]?.customCharges || {},
-      pendingAmount: draftReadings[f.id]?.pendingAmount ?? 0,
-      advanceAmount: draftReadings[f.id]?.advanceAmount ?? 0,
-    })),
+    readings: flats.map((f) => {
+      const isShop = (f.flatNumber || '').toLowerCase().includes('shop') || (f.id || '').toLowerCase().includes('shop');
+      return {
+        flatId: f.id,
+        previousReading: draftReadings[f.id]?.previous ?? f.baselineReading,
+        currentReading: draftReadings[f.id]?.current ?? f.baselineReading + 100,
+        maintenanceCharges: draftReadings[f.id]?.maintenanceCharges !== undefined
+          ? draftReadings[f.id]?.maintenanceCharges
+          : (isShop ? 0 : (settings.defaultMaintenanceCharges ?? 110)),
+        maintenanceLabel: draftReadings[f.id]?.maintenanceLabel || maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning',
+        commonMeterCharges: draftReadings[f.id]?.commonMeterCharges !== undefined
+          ? draftReadings[f.id]?.commonMeterCharges
+          : (isShop ? 0 : (settings.defaultCommonMeterCharges ?? 160)),
+        commonMeterLabel: draftReadings[f.id]?.commonMeterLabel || commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light',
+        customCharges: draftReadings[f.id]?.customCharges || {},
+        pendingAmount: draftReadings[f.id]?.pendingAmount ?? 0,
+        advanceAmount: draftReadings[f.id]?.advanceAmount ?? 0,
+      };
+    }),
   });
 
   // Handle saving readings into the active cycle or new cycle
   const handleSaveReadings = () => {
     const updatedEntries: FlatReadingEntry[] = previewCalculation.flatReadings.map((pr) => {
       const existing = activeCycle.readings.find((r) => r.flatId === pr.flatId);
+      const isShop = (pr.flatNumber || '').toLowerCase().includes('shop') || (pr.flatId || '').toLowerCase().includes('shop');
+      const commonAmt = draftReadings[pr.flatId]?.commonMeterCharges !== undefined
+        ? draftReadings[pr.flatId]?.commonMeterCharges
+        : (pr.commonMeterCharges !== undefined ? pr.commonMeterCharges : (isShop ? 0 : (settings.defaultCommonMeterCharges ?? 160)));
+      const maintAmt = draftReadings[pr.flatId]?.maintenanceCharges !== undefined
+        ? draftReadings[pr.flatId]?.maintenanceCharges
+        : (pr.maintenanceCharges !== undefined ? pr.maintenanceCharges : (isShop ? 0 : (settings.defaultMaintenanceCharges ?? 110)));
       const pendingAmt = draftReadings[pr.flatId]?.pendingAmount ?? pr.pendingAmount ?? 0;
       const advanceAmt = draftReadings[pr.flatId]?.advanceAmount ?? pr.advanceAmount ?? 0;
       const netPayable = Math.max(0, pr.totalBillAmount + pendingAmt - advanceAmt);
       return {
         ...pr,
+        commonMeterCharges: commonAmt,
+        maintenanceCharges: maintAmt,
         commonMeterLabel: draftReadings[pr.flatId]?.commonMeterLabel || commonMeterLabel,
         maintenanceLabel: draftReadings[pr.flatId]?.maintenanceLabel || maintenanceLabel,
         customCharges: draftReadings[pr.flatId]?.customCharges || pr.customCharges || {},
@@ -1328,8 +1347,13 @@ export const AdminDashboard: React.FC = () => {
                       ? flat.customRatePerUnit
                       : previewCalculation.effectiveRatePerUnit;
                     const energyAmt = Math.round(units * rate);
-                    const commonAmt = draftReadings[flat.id]?.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160;
-                    const maintAmt = draftReadings[flat.id]?.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110;
+                    const isShopFlat = (flat.flatNumber || '').toLowerCase().includes('shop') || (flat.id || '').toLowerCase().includes('shop');
+                    const commonAmt = draftReadings[flat.id]?.commonMeterCharges !== undefined
+                      ? draftReadings[flat.id]?.commonMeterCharges
+                      : (isShopFlat ? 0 : (settings.defaultCommonMeterCharges ?? 160));
+                    const maintAmt = draftReadings[flat.id]?.maintenanceCharges !== undefined
+                      ? draftReadings[flat.id]?.maintenanceCharges
+                      : (isShopFlat ? 0 : (settings.defaultMaintenanceCharges ?? 110));
 
                     let customChargesSum = 0;
                     activeCustomColumns.forEach((col) => {
@@ -1767,8 +1791,13 @@ export const AdminDashboard: React.FC = () => {
                           ? flat.customRatePerUnit
                           : previewCalculation.effectiveRatePerUnit;
                         const energyAmt = Math.round(units * rate);
-                        const commonAmt = draftReadings[flat.id]?.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160;
-                        const maintAmt = draftReadings[flat.id]?.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110;
+                        const isShopFlat = (flat.flatNumber || '').toLowerCase().includes('shop') || (flat.id || '').toLowerCase().includes('shop');
+                        const commonAmt = draftReadings[flat.id]?.commonMeterCharges !== undefined
+                          ? draftReadings[flat.id]?.commonMeterCharges
+                          : (isShopFlat ? 0 : (settings.defaultCommonMeterCharges ?? 160));
+                        const maintAmt = draftReadings[flat.id]?.maintenanceCharges !== undefined
+                          ? draftReadings[flat.id]?.maintenanceCharges
+                          : (isShopFlat ? 0 : (settings.defaultMaintenanceCharges ?? 110));
 
                         // Sum all custom charges for this flat
                         let customChargesSum = 0;
@@ -2309,7 +2338,8 @@ export const AdminDashboard: React.FC = () => {
                       const pendingAmt = reading.pendingAmount ?? (reading.previousBalance && reading.previousBalance > 0 ? reading.previousBalance : 0);
                       const advanceAmt = reading.advanceAmount ?? (reading.previousBalance && reading.previousBalance < 0 ? Math.abs(reading.previousBalance) : 0);
                       const netAmt = reading.netPayableAmount ?? (reading.totalBillAmount + pendingAmt - advanceAmt);
-                      const commonPlusMaint = (reading.commonMeterCharges ?? 160) + (reading.maintenanceCharges ?? 110);
+                      const isShopReading = (reading.flatNumber || '').toLowerCase().includes('shop') || (reading.flatId || '').toLowerCase().includes('shop');
+                      const commonPlusMaint = (reading.commonMeterCharges !== undefined ? reading.commonMeterCharges : (isShopReading ? 0 : 160)) + (reading.maintenanceCharges !== undefined ? reading.maintenanceCharges : (isShopReading ? 0 : 110));
 
                       return (
                         <tr key={reading.flatId} className="hover:bg-slate-50/70 transition-colors">
@@ -2500,18 +2530,22 @@ export const AdminDashboard: React.FC = () => {
                         ₹{reading.calculatedAmount.toLocaleString('en-IN')}/-
                       </span>
                     </div>
-                    <div className="flex items-center justify-between text-[11px] text-slate-500">
-                      <span>{reading.commonMeterLabel || commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light'}:</span>
-                      <span className="font-medium text-slate-700">
-                        ₹{(reading.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160).toLocaleString('en-IN')}/-
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between text-[11px] text-slate-500">
-                      <span>{reading.maintenanceLabel || maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning'}:</span>
-                      <span className="font-medium text-slate-700">
-                        ₹{(reading.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110).toLocaleString('en-IN')}/-
-                      </span>
-                    </div>
+                    {((reading.commonMeterCharges !== undefined ? reading.commonMeterCharges : ((reading.flatNumber || '').toLowerCase().includes('shop') || (reading.flatId || '').toLowerCase().includes('shop') ? 0 : (settings.defaultCommonMeterCharges ?? 160))) > 0) && (
+                      <div className="flex items-center justify-between text-[11px] text-slate-500">
+                        <span>{reading.commonMeterLabel || commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light'}:</span>
+                        <span className="font-medium text-slate-700">
+                          ₹{(reading.commonMeterCharges !== undefined ? reading.commonMeterCharges : ((reading.flatNumber || '').toLowerCase().includes('shop') || (reading.flatId || '').toLowerCase().includes('shop') ? 0 : (settings.defaultCommonMeterCharges ?? 160))).toLocaleString('en-IN')}/-
+                        </span>
+                      </div>
+                    )}
+                    {((reading.maintenanceCharges !== undefined ? reading.maintenanceCharges : ((reading.flatNumber || '').toLowerCase().includes('shop') || (reading.flatId || '').toLowerCase().includes('shop') ? 0 : (settings.defaultMaintenanceCharges ?? 110))) > 0) && (
+                      <div className="flex items-center justify-between text-[11px] text-slate-500">
+                        <span>{reading.maintenanceLabel || maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning'}:</span>
+                        <span className="font-medium text-slate-700">
+                          ₹{(reading.maintenanceCharges !== undefined ? reading.maintenanceCharges : ((reading.flatNumber || '').toLowerCase().includes('shop') || (reading.flatId || '').toLowerCase().includes('shop') ? 0 : (settings.defaultMaintenanceCharges ?? 110))).toLocaleString('en-IN')}/-
+                        </span>
+                      </div>
+                    )}
 
                     <div className="border-t border-slate-200 pt-1 flex items-center justify-between text-slate-600">
                       <span className="text-[11px] font-medium">Month Bill:</span>
