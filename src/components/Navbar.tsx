@@ -259,6 +259,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 }}
                 className="relative p-1.5 sm:p-2 rounded-lg text-slate-600 hover:bg-slate-100 border border-transparent hover:border-slate-200 transition-colors"
                 title="Notifications"
+                aria-label="View notifications"
               >
                 <Bell className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
                 {unreadCount > 0 && (
@@ -268,57 +269,79 @@ export const Navbar: React.FC<NavbarProps> = ({
                 )}
               </button>
 
-              {/* Notification Dropdown */}
+              {/* Notification Dropdown - Perfectly centered and visible on Android & mobile screens */}
               {showNotifs && (
-                <div className="absolute right-0 mt-2 w-80 sm:w-88 bg-white rounded-xl shadow-xl border border-slate-200 p-3 z-50 animate-in fade-in zoom-in-95 duration-150">
-                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                    <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                      Notifications & Alerts
-                    </span>
-                    <button
-                      onClick={() => setShowNotifs(false)}
-                      className="text-slate-400 hover:text-slate-600 p-0.5"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                <>
+                  {/* Backdrop for outside click / mobile dismiss */}
+                  <div
+                    className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-xs sm:bg-transparent"
+                    onClick={() => setShowNotifs(false)}
+                  />
 
-                  {/* Native push enable button */}
-                  {'Notification' in window && Notification.permission !== 'granted' && (
-                    <div className="my-2 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between gap-2">
-                      <span className="text-[11px] text-amber-900 font-medium">
-                        Enable free browser alerts for new bills
-                      </span>
+                  <div
+                    className={`z-50 bg-white rounded-2xl shadow-2xl border border-slate-200 p-3.5 animate-in fade-in zoom-in-95 duration-150 ${
+                      isMobileFrame
+                        ? 'absolute left-2 right-2 top-12 w-auto'
+                        : 'fixed top-14 left-2 right-2 max-w-sm mx-auto sm:max-w-none sm:mx-0 sm:left-auto sm:right-0 sm:top-full sm:absolute sm:mt-2 sm:w-88'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-1.5">
+                        <Bell className="w-3.5 h-3.5 text-amber-500" />
+                        <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                          Notifications & Alerts
+                        </span>
+                      </div>
                       <button
-                        onClick={requestPushPermission}
-                        className="text-[10px] font-bold px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-md shrink-0 shadow-xs"
+                        onClick={() => setShowNotifs(false)}
+                        className="text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-100 transition-colors cursor-pointer"
+                        title="Close notifications"
+                        aria-label="Close notifications"
                       >
-                        Allow
+                        <X className="w-4 h-4" />
                       </button>
                     </div>
-                  )}
 
-                  <div className="max-h-64 overflow-y-auto divide-y divide-slate-100 text-xs mt-1">
-                    {notifications.length === 0 ? (
-                      <div className="py-4 text-center text-slate-400">No notifications yet</div>
-                    ) : (
-                      notifications.map((n) => (
-                        <div key={n.id} className="py-2.5">
-                          <div className="font-semibold text-slate-800 flex items-center gap-1.5">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                            {n.title}
-                          </div>
-                          <p className="text-slate-600 text-[11px] mt-0.5 leading-relaxed">
-                            {n.message}
-                          </p>
-                          <span className="text-[10px] text-slate-400 mt-1 block">
-                            {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                      ))
+                    {/* Native push enable button */}
+                    {'Notification' in window && Notification.permission !== 'granted' && (
+                      <div className="my-2 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between gap-2">
+                        <span className="text-[11px] text-amber-900 font-medium">
+                          Enable free browser alerts for new bills
+                        </span>
+                        <button
+                          onClick={requestPushPermission}
+                          className="text-[10px] font-bold px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-md shrink-0 shadow-xs cursor-pointer"
+                        >
+                          Allow
+                        </button>
+                      </div>
                     )}
+
+                    <div className="max-h-64 sm:max-h-80 overflow-y-auto divide-y divide-slate-100 text-xs mt-1">
+                      {notifications.length === 0 ? (
+                        <div className="py-6 text-center text-slate-400 flex flex-col items-center gap-2">
+                          <Bell className="w-6 h-6 text-slate-300" />
+                          <span>No notifications yet</span>
+                        </div>
+                      ) : (
+                        notifications.map((n) => (
+                          <div key={n.id} className="py-2.5">
+                            <div className="font-semibold text-slate-800 flex items-center gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                              {n.title}
+                            </div>
+                            <p className="text-slate-600 text-[11px] mt-0.5 leading-relaxed">
+                              {n.message}
+                            </p>
+                            <span className="text-[10px] text-slate-400 mt-1 block font-mono">
+                              {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
-                </div>
+                </>
               )}
             </div>
           )}
@@ -409,8 +432,13 @@ export const Navbar: React.FC<NavbarProps> = ({
 
               {/* User Account / Role Menu */}
               {showRoleMenu && (
-                <div className="absolute right-0 mt-2 w-72 bg-white rounded-xl shadow-xl border border-slate-200 p-3 z-50 animate-in fade-in zoom-in-95 duration-150">
-                  {currentSession.role === 'resident' ? (
+                <>
+                  <div
+                    className="fixed inset-0 z-40 bg-slate-900/30 backdrop-blur-xs sm:bg-transparent"
+                    onClick={() => setShowRoleMenu(false)}
+                  />
+                  <div className="absolute right-0 mt-2 w-72 max-w-[calc(100vw-1rem)] bg-white rounded-xl shadow-xl border border-slate-200 p-3 z-50 animate-in fade-in zoom-in-95 duration-150">
+                    {currentSession.role === 'resident' ? (
                     <div>
                       <div className="flex items-center gap-2 pb-2 border-b border-slate-100 mb-2">
                         <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center">
@@ -696,7 +724,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </div>
                   )}
                 </div>
-              )}
+              </>
+            )}
             </div>
           ) : null}
         </div>

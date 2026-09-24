@@ -82,6 +82,7 @@ export const AdminBroadcastsManager: React.FC = () => {
   const [editingBroadcast, setEditingBroadcast] = useState<SocietyBroadcast | null>(null);
   const [showDeleteConfirmId, setShowDeleteConfirmId] = useState<string | null>(null);
   const [successToast, setSuccessToast] = useState<string>('');
+  const [formError, setFormError] = useState<string>('');
 
   // Form State
   const [formData, setFormData] = useState<{
@@ -109,6 +110,7 @@ export const AdminBroadcastsManager: React.FC = () => {
 
   const handleOpenCreate = (initialCategory?: SocietyBroadcastCategory) => {
     setEditingBroadcast(null);
+    setFormError('');
     setFormData({
       category: initialCategory || (selectedCategoryFilter === 'all' ? 'notice' : selectedCategoryFilter),
       title: '',
@@ -123,6 +125,7 @@ export const AdminBroadcastsManager: React.FC = () => {
 
   const handleOpenEdit = (item: SocietyBroadcast) => {
     setEditingBroadcast(item);
+    setFormError('');
     setFormData({
       category: item.category,
       title: item.title,
@@ -136,6 +139,7 @@ export const AdminBroadcastsManager: React.FC = () => {
   };
 
   const applyTemplate = (tmpl: QuickTemplate) => {
+    setFormError('');
     setFormData({
       category: tmpl.category,
       title: tmpl.title,
@@ -151,12 +155,13 @@ export const AdminBroadcastsManager: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError('');
     if (!formData.title.trim()) {
-      alert('Please provide a title for this entry.');
+      setFormError('Please provide a title for this entry.');
       return;
     }
     if (!formData.content.trim()) {
-      alert('Please enter the message content.');
+      setFormError('Please enter the message content.');
       return;
     }
 
@@ -340,201 +345,223 @@ export const AdminBroadcastsManager: React.FC = () => {
         </div>
       </div>
 
-      {/* Create / Edit Form Card */}
+      {/* Create / Edit Form Modal - Opens centered on screen so mobile users never lose their place */}
       {isCreating && (
-        <div className="bg-white border-2 border-indigo-500/40 rounded-2xl p-4 sm:p-5 shadow-lg animate-in fade-in duration-200">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
-                {editingBroadcast ? <Edit2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">
-                  {editingBroadcast ? 'Edit Society Broadcast' : 'Publish New Notice / Appeal / Announcement'}
-                </h3>
-                <p className="text-xs text-slate-500">
-                  This text will be synced across all flat owner portals in real-time.
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setIsCreating(false);
-                setEditingBroadcast(null);
-              }}
-              className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+          {/* Backdrop click to dismiss */}
+          <div
+            className="fixed inset-0"
+            onClick={() => {
+              setIsCreating(false);
+              setEditingBroadcast(null);
+            }}
+          />
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Category Selector */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                Target Section <span className="text-rose-500">*</span>
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setFormData({ ...formData, category: 'notice' })}
-                  className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                    formData.category === 'notice'
-                      ? 'bg-blue-50 border-blue-500 text-blue-800 ring-2 ring-blue-500/20 shadow-xs'
-                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <Bell className="w-3.5 h-3.5 text-blue-600" />
-                  Notice
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFormData({ ...formData, category: 'appeal' })}
-                  className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                    formData.category === 'appeal'
-                      ? 'bg-amber-50 border-amber-500 text-amber-800 ring-2 ring-amber-500/20 shadow-xs'
-                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <HeartHandshake className="w-3.5 h-3.5 text-amber-600" />
-                  Appeal
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFormData({ ...formData, category: 'announcement' })}
-                  className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                    formData.category === 'announcement'
-                      ? 'bg-emerald-50 border-emerald-500 text-emerald-800 ring-2 ring-emerald-500/20 shadow-xs'
-                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <Megaphone className="w-3.5 h-3.5 text-emerald-600" />
-                  Announcement
-                </button>
-              </div>
-            </div>
-
-            {/* Title & Date */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Title / Subject <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  placeholder="e.g. Water Tank Cleaning Schedule on Sunday"
-                  required
-                  className="w-full text-xs sm:text-sm px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-medium text-slate-900"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Date</label>
-                <div className="relative">
-                  <input
-                    type="date"
-                    value={formData.date}
-                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                    className="w-full text-xs sm:text-sm px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-medium text-slate-900"
-                  />
+          <div className="relative bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-xl my-auto overflow-hidden animate-in zoom-in-95 duration-150 max-h-[92vh] flex flex-col z-10">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50/80">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold shrink-0 shadow-2xs">
+                  {editingBroadcast ? <Edit2 className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                    {editingBroadcast ? 'Edit Society Broadcast' : 'Publish New Notice / Appeal / Announcement'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    {editingBroadcast ? `Updating "${editingBroadcast.title}"` : 'This message will be instantly displayed on all resident flat portals.'}
+                  </p>
                 </div>
               </div>
-            </div>
-
-            {/* Content Textarea */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-bold text-slate-700">
-                  Broadcast Message / Content <span className="text-rose-500">*</span>
-                </label>
-                <span className="text-[10px] text-slate-400 font-mono">
-                  {formData.content.length} characters
-                </span>
-              </div>
-              <textarea
-                rows={4}
-                value={formData.content}
-                onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-                placeholder="Write the complete notice, appeal, or announcement message. Flat owners will read this in their portal..."
-                required
-                className="w-full text-xs sm:text-sm p-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-slate-900 leading-relaxed font-normal"
-              />
-            </div>
-
-            {/* Priority, Author, and Active Toggle */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Priority Level</label>
-                <select
-                  value={formData.priority}
-                  onChange={(e) =>
-                    setFormData({ ...formData, priority: e.target.value as 'normal' | 'important' | 'urgent' })
-                  }
-                  className="w-full text-xs sm:text-sm px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-indigo-500 font-medium text-slate-900"
-                >
-                  <option value="normal">Normal (Standard)</option>
-                  <option value="important">Important (Highlighted)</option>
-                  <option value="urgent">Urgent (Red Alert)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Issued By / Author</label>
-                <input
-                  type="text"
-                  value={formData.author}
-                  onChange={(e) => setFormData({ ...formData, author: e.target.value })}
-                  placeholder="e.g. Society Secretary / Committee"
-                  className="w-full text-xs sm:text-sm px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-indigo-500 font-medium text-slate-900"
-                />
-              </div>
-
-              <div className="flex items-end">
-                <label className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between cursor-pointer hover:bg-slate-100 transition-colors">
-                  <span className="text-xs font-semibold text-slate-700">Display Status:</span>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`text-[11px] font-bold ${
-                        formData.isActive ? 'text-emerald-700' : 'text-slate-400'
-                      }`}
-                    >
-                      {formData.isActive ? 'Active (Live)' : 'Draft (Hidden)'}
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={formData.isActive}
-                      onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-                      className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
-                    />
-                  </div>
-                </label>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => {
                   setIsCreating(false);
                   setEditingBroadcast(null);
                 }}
-                className="py-2 px-4 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                title="Close"
               >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="py-2.5 px-5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs sm:text-sm font-semibold rounded-xl flex items-center gap-2 shadow-xs transition-all cursor-pointer"
-              >
-                <Check className="w-4 h-4" />
-                <span>{editingBroadcast ? 'Save & Update Post' : 'Publish to All Flats'}</span>
+                <X className="w-5 h-5" />
               </button>
             </div>
-          </form>
+
+            {/* Modal Body & Form */}
+            <form onSubmit={handleSubmit} className="p-4 sm:p-5 overflow-y-auto space-y-4">
+              {/* Validation Error Message */}
+              {formError && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold text-rose-700 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{formError}</span>
+                </div>
+              )}
+
+              {/* Category Selector */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Category Section <span className="text-rose-500">*</span>
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, category: 'notice' })}
+                    className={`py-2.5 px-2 sm:px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer ${
+                      formData.category === 'notice'
+                        ? 'bg-blue-50 border-blue-500 text-blue-800 ring-2 ring-blue-500/20 shadow-xs'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Bell className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                    <span>Notice</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, category: 'appeal' })}
+                    className={`py-2.5 px-2 sm:px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer ${
+                      formData.category === 'appeal'
+                        ? 'bg-amber-50 border-amber-500 text-amber-800 ring-2 ring-amber-500/20 shadow-xs'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <HeartHandshake className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span>Appeal</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, category: 'announcement' })}
+                    className={`py-2.5 px-2 sm:px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer ${
+                      formData.category === 'announcement'
+                        ? 'bg-emerald-50 border-emerald-500 text-emerald-800 ring-2 ring-emerald-500/20 shadow-xs'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Megaphone className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span className="truncate">Announcement</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Title & Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Title / Subject <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.title}
+                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                    placeholder="e.g. Water Tank Cleaning Schedule on Sunday"
+                    required
+                    className="w-full text-xs sm:text-sm px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-medium text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Date</label>
+                  <div className="relative">
+                    <input
+                      type="date"
+                      value={formData.date}
+                      onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                      className="w-full text-xs sm:text-sm px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-medium text-slate-900"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Content Textarea */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700">
+                    Broadcast Message / Content <span className="text-rose-500">*</span>
+                  </label>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    {formData.content.length} characters
+                  </span>
+                </div>
+                <textarea
+                  rows={4}
+                  value={formData.content}
+                  onChange={(e) => setFormData({ ...formData, content: e.target.value })}
+                  placeholder="Write the complete notice, appeal, or announcement message. Flat owners will read this in their portal..."
+                  required
+                  className="w-full text-xs sm:text-sm p-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-slate-900 leading-relaxed font-normal"
+                />
+              </div>
+
+              {/* Priority, Author, and Active Toggle */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Priority Level</label>
+                  <select
+                    value={formData.priority}
+                    onChange={(e) =>
+                      setFormData({ ...formData, priority: e.target.value as 'normal' | 'important' | 'urgent' })
+                    }
+                    className="w-full text-xs sm:text-sm px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-indigo-500 font-medium text-slate-900"
+                  >
+                    <option value="normal">Normal (Standard)</option>
+                    <option value="important">Important (Highlighted)</option>
+                    <option value="urgent">Urgent (Red Alert)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Issued By / Author</label>
+                  <input
+                    type="text"
+                    value={formData.author}
+                    onChange={(e) => setFormData({ ...formData, author: e.target.value })}
+                    placeholder="e.g. Society Secretary / Committee"
+                    className="w-full text-xs sm:text-sm px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:border-indigo-500 font-medium text-slate-900"
+                  />
+                </div>
+
+                <div className="flex items-end">
+                  <label className="w-full py-2.5 px-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between cursor-pointer hover:bg-slate-100 transition-colors">
+                    <span className="text-xs font-semibold text-slate-700">Display Status:</span>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-[11px] font-bold ${
+                          formData.isActive ? 'text-emerald-700' : 'text-slate-400'
+                        }`}
+                      >
+                        {formData.isActive ? 'Active (Live)' : 'Draft (Hidden)'}
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={formData.isActive}
+                        onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
+                        className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300"
+                      />
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCreating(false);
+                    setEditingBroadcast(null);
+                  }}
+                  className="py-2 px-4 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="py-2.5 px-5 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs sm:text-sm font-semibold rounded-xl flex items-center gap-2 shadow-xs transition-all cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{editingBroadcast ? 'Save & Update Post' : 'Publish to All Flats'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
