@@ -709,16 +709,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [expenses, setExpenses] = useState<BuildingExpense[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.EXPENSES);
-      const list = saved ? JSON.parse(saved) : INITIAL_EXPENSES;
-      // Filter out September and October expenses as requested
-      return (list as BuildingExpense[]).filter((e) => {
-        const cid = e.cycleId || '';
-        const mkey = e.monthKey || '';
-        const d = e.date || '';
-        const isSep = cid.includes('2026-09') || mkey === '2026-09' || d.startsWith('2026-09');
-        const isOct = cid.includes('2026-10') || mkey === '2026-10' || d.startsWith('2026-10');
-        return !isSep && !isOct;
-      });
+      return saved ? JSON.parse(saved) : INITIAL_EXPENSES;
     } catch {
       return INITIAL_EXPENSES;
     }
@@ -864,17 +855,6 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               }
             }
 
-            if (cloudCycles.length > 0) {
-              cloudCycles = cloudCycles.filter((c: BillingCycle) => {
-                const m = (c.month || '').toLowerCase();
-                const key = c.monthKey || '';
-                const cid = c.id || '';
-                const isSep = key === '2026-09' || m.includes('september') || cid.includes('2026-09');
-                const isOct = key === '2026-10' || m.includes('october') || cid.includes('2026-10');
-                return !isSep && !isOct;
-              });
-            }
-
             if (cloudFlats.length > 0 && cloudCycles.length > 0) {
               const { cleanedFlats, cleanedCycles, reassignedMap } = deduplicateFlatsAndCycles(cloudFlats, cloudCycles);
               setFlats(cleanedFlats);
@@ -902,20 +882,10 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               setCycles(syncCycleBalances(cloudCycles));
             }
             if (data.activeCycleId) {
-              const aid = data.activeCycleId;
-              const isInvalid = aid.includes('2026-09') || aid.includes('2026-10') || aid.toLowerCase().includes('september') || aid.toLowerCase().includes('october');
-              setActiveCycleId(isInvalid ? (INITIAL_CYCLES[0]?.id || 'cycle-2026-08') : aid);
+              setActiveCycleId(data.activeCycleId);
             }
             if (Array.isArray(data.expenses)) {
-              const filteredExpenses = data.expenses.filter((e: BuildingExpense) => {
-                const cid = e.cycleId || '';
-                const mkey = e.monthKey || '';
-                const d = e.date || '';
-                const isSep = cid.includes('2026-09') || mkey === '2026-09' || d.startsWith('2026-09');
-                const isOct = cid.includes('2026-10') || mkey === '2026-10' || d.startsWith('2026-10');
-                return !isSep && !isOct;
-              });
-              setExpenses(filteredExpenses);
+              setExpenses(data.expenses);
             }
             if (Array.isArray(data.broadcasts)) {
               setBroadcasts(data.broadcasts);

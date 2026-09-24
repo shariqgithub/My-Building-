@@ -263,16 +263,25 @@ export const LockScreen: React.FC = () => {
             </div>
 
             <button
-              onClick={() => {
-                if (confirm('Sign out and switch to a different phone number?')) {
-                  logout();
-                }
-              }}
+              type="button"
+              onClick={() => logout()}
               className="text-[11px] font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2 py-1 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
               title="Sign out this account"
             >
               <LogOut className="w-3.5 h-3.5" />
               Switch
+            </button>
+          </div>
+
+          {/* Quick Not-You Switch Button for instant access with one tap */}
+          <div className="mt-2 text-center">
+            <button
+              type="button"
+              onClick={() => logout()}
+              className="w-full py-1.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-200"
+            >
+              <LogOut className="w-3.5 h-3.5 text-slate-500" />
+              <span>Not your flat / phone? Tap to sign in with your number</span>
             </button>
           </div>
         </div>
@@ -512,11 +521,7 @@ export const LockScreen: React.FC = () => {
 
               <button
                 type="button"
-                onClick={() => {
-                  if (confirm('Are you sure you want to sign out? You will need to log in again.')) {
-                    logout();
-                  }
-                }}
+                onClick={() => logout()}
                 className="text-slate-500 hover:text-rose-600 font-medium flex items-center gap-1 cursor-pointer transition-colors"
               >
                 <LogOut className="w-3.5 h-3.5" />

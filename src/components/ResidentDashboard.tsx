@@ -171,32 +171,48 @@ export const ResidentDashboard: React.FC = () => {
   // Current Month Key for active cycle
   const currentMonthKey = activeCycle?.monthKey || '2026-09';
 
-  // Current Month Building Expenses (added by admin, excluding main government electricity bill)
+  // Building expenses visible to flat owners (strictly excludes the main electricity bill)
+  const residentExpenses = useMemo(() => {
+    return expenses.filter((exp) => {
+      if (exp.category === 'electricity_bill') return false;
+      const titleLower = (exp.title || '').toLowerCase();
+      if (titleLower.includes('electricity bill') || titleLower.includes('govt electricity')) return false;
+      return true;
+    });
+  }, [expenses]);
+
+  // Current Month Building Expenses (visible to residents, excluding electricity bill)
   const currentMonthExpenses = useMemo(() => {
-    return expenses
-      .filter((exp) => {
-        // Exclude main government electricity bill - only display extra expenses
-        if (exp.category === 'electricity_bill') return false;
-        if (exp.monthKey) return exp.monthKey === currentMonthKey;
-        if (exp.cycleId && activeCycle) return exp.cycleId === activeCycle.id;
-        return false;
-      })
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [expenses, currentMonthKey, activeCycle]);
+    const matched = residentExpenses.filter((exp) => {
+      if (exp.cycleId && activeCycle && exp.cycleId === activeCycle.id) return true;
+      if (exp.monthKey && currentMonthKey && exp.monthKey === currentMonthKey) return true;
+      if (exp.date && currentMonthKey && exp.date.startsWith(currentMonthKey)) return true;
+      return false;
+    });
+
+    if (matched.length > 0) {
+      return [...matched].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }
+
+    // If no direct month match, show all society building expenses (excluding electricity bill)
+    return [...residentExpenses].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [residentExpenses, currentMonthKey, activeCycle]);
 
   // Current month expenses total
   const currentMonthExpensesTotal = useMemo(() => {
     return currentMonthExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
   }, [currentMonthExpenses]);
 
-  // Historical / Filtered Expenses for the Building Expenses tab
+  // Historical / Filtered Expenses for the Building Expenses tab (strictly excluding electricity bill)
   const historicalExpenses = useMemo(() => {
-    return expenses
+    return residentExpenses
       .filter((exp) => {
         // Month filter
         if (selectedExpenseMonthKey !== 'all') {
-          const matchMonth = exp.monthKey === selectedExpenseMonthKey ||
-            (exp.cycleId && cycles.find((c) => c.id === exp.cycleId)?.monthKey === selectedExpenseMonthKey);
+          const matchMonth =
+            exp.monthKey === selectedExpenseMonthKey ||
+            (exp.cycleId && cycles.find((c) => c.id === exp.cycleId)?.monthKey === selectedExpenseMonthKey) ||
+            (exp.date && exp.date.startsWith(selectedExpenseMonthKey));
           if (!matchMonth) return false;
         }
 
@@ -217,7 +233,7 @@ export const ResidentDashboard: React.FC = () => {
         return true;
       })
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [expenses, selectedExpenseMonthKey, selectedCategoryFilter, expenseSearchQuery, cycles]);
+  }, [residentExpenses, selectedExpenseMonthKey, selectedCategoryFilter, expenseSearchQuery, cycles]);
 
   const historicalExpensesTotal = useMemo(() => {
     return historicalExpenses.reduce((sum, e) => sum + (e.amount || 0), 0);
@@ -398,7 +414,7 @@ export const ResidentDashboard: React.FC = () => {
           }`}
         >
           <Receipt className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Building Expenses ({expenses.length})</span>
+          <span>Building Expenses ({residentExpenses.length})</span>
         </button>
       </div>
 
@@ -1187,7 +1203,7 @@ export const ResidentDashboard: React.FC = () => {
                   </h3>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Transparent public audit log of all maintenance, electricity bills, stairs cleaning, sewer cleaning, and repairs paid from society funds.
+                  Transparent public audit log of all maintenance, stairs cleaning, sewer cleaning, and repairs paid from society funds.
                 </p>
               </div>
 
@@ -1247,11 +1263,13 @@ export const ResidentDashboard: React.FC = () => {
                   className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-medium text-slate-700 focus:outline-emerald-500 cursor-pointer"
                 >
                   <option value="all">All Categories</option>
-                  {Object.entries(CATEGORY_CONFIG).map(([key, config]) => (
-                    <option key={key} value={key}>
-                      {config.label}
-                    </option>
-                  ))}
+                  {Object.entries(CATEGORY_CONFIG)
+                    .filter(([key]) => key !== 'electricity_bill')
+                    .map(([key, config]) => (
+                      <option key={key} value={key}>
+                        {config.label}
+                      </option>
+                    ))}
                 </select>
               </div>
             </div>

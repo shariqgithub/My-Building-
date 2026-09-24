@@ -32,14 +32,9 @@ export const UpiPaymentModal: React.FC<UpiPaymentModalProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [copiedUpi, setCopiedUpi] = useState(false);
-  const [copiedAmount, setCopiedAmount] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
   const [downloadSuccess, setDownloadSuccess] = useState(false);
   const [utrNumber, setUtrNumber] = useState('');
   const [submitted, setSubmitted] = useState(false);
-  const [activeQrView, setActiveQrView] = useState<'custom' | 'dynamic'>(
-    settings.upiQrCodeUrl ? 'custom' : 'dynamic'
-  );
 
   const amountToPay = reading.netPayableAmount ?? reading.totalBillAmount;
   const transactionNote = `Flat ${reading.flatNumber} Elec Bill ${monthName}`;
@@ -52,7 +47,7 @@ export const UpiPaymentModal: React.FC<UpiPaymentModalProps> = ({
   });
 
   useEffect(() => {
-    if (isOpen && canvasRef.current) {
+    if (isOpen && canvasRef.current && !settings.upiQrCodeUrl) {
       QRCode.toCanvas(
         canvasRef.current,
         upiLink,
@@ -69,7 +64,7 @@ export const UpiPaymentModal: React.FC<UpiPaymentModalProps> = ({
         }
       );
     }
-  }, [isOpen, upiLink, activeQrView]);
+  }, [isOpen, upiLink, settings.upiQrCodeUrl]);
 
   if (!isOpen) return null;
 
@@ -79,22 +74,10 @@ export const UpiPaymentModal: React.FC<UpiPaymentModalProps> = ({
     setTimeout(() => setCopiedUpi(false), 2000);
   };
 
-  const handleCopyAmount = () => {
-    navigator.clipboard.writeText(amountToPay.toString());
-    setCopiedAmount(true);
-    setTimeout(() => setCopiedAmount(false), 2000);
-  };
-
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(upiLink);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
-  };
-
   const handleDownloadQr = () => {
     try {
       let dataUrl = '';
-      if (activeQrView === 'custom' && settings.upiQrCodeUrl) {
+      if (settings.upiQrCodeUrl) {
         dataUrl = settings.upiQrCodeUrl;
       } else if (canvasRef.current) {
         dataUrl = canvasRef.current.toDataURL('image/png');
@@ -208,39 +191,9 @@ export const UpiPaymentModal: React.FC<UpiPaymentModalProps> = ({
               )}
             </div>
 
-            {/* QR Code Tab Switcher (if admin uploaded custom QR) */}
-            {settings.upiQrCodeUrl && (
-              <div className="flex p-1 bg-slate-100 rounded-xl mb-3 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setActiveQrView('custom')}
-                  className={`flex-1 py-1.5 text-center font-bold rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer ${
-                    activeQrView === 'custom'
-                      ? 'bg-white text-emerald-800 shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                  Society Admin QR
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveQrView('dynamic')}
-                  className={`flex-1 py-1.5 text-center font-semibold rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer ${
-                    activeQrView === 'dynamic'
-                      ? 'bg-white text-slate-900 shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <QrCode className="w-3.5 h-3.5 text-slate-500" />
-                  Auto-Filled ₹{amountToPay} QR
-                </button>
-              </div>
-            )}
-
             {/* QR Code Box */}
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center mb-3">
-              {settings.upiQrCodeUrl && activeQrView === 'custom' ? (
+              {settings.upiQrCodeUrl ? (
                 <div>
                   <div className="inline-block bg-white p-2.5 rounded-2xl border border-slate-200 shadow-xs mb-2">
                     <img
@@ -255,7 +208,7 @@ export const UpiPaymentModal: React.FC<UpiPaymentModalProps> = ({
                       Official Admin QR Code Verified
                     </span>
                     <p className="text-[11px] text-slate-500 mt-1">
-                      Scan or download & pay exact amount ₹{amountToPay}
+                      Scan or download &amp; pay exact amount ₹{amountToPay}
                     </p>
                   </div>
                 </div>
@@ -266,38 +219,20 @@ export const UpiPaymentModal: React.FC<UpiPaymentModalProps> = ({
                   </div>
                   <p className="text-xs text-slate-600 font-medium flex items-center justify-center gap-1">
                     <QrCode className="w-3.5 h-3.5 text-slate-500" />
-                    Scan with any UPI App • Exact amount ₹{amountToPay} pre-filled
+                    Scan with any UPI App • Exact amount ₹{amountToPay}
                   </p>
                 </div>
               )}
 
-              {/* Action Buttons Right Under QR: Download QR & Copy Amount */}
-              <div className="mt-3 flex flex-col sm:flex-row gap-2">
+              {/* Action Button Right Under QR: Download QR */}
+              <div className="mt-3">
                 <button
                   type="button"
                   onClick={handleDownloadQr}
-                  className="flex-1 py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                  className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
                 >
                   <ArrowDownToLine className="w-4 h-4" />
                   <span>Download QR Code (Save to Phone)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCopyAmount}
-                  className="py-2.5 px-3 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 font-semibold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  title="Copy amount to clipboard"
-                >
-                  {copiedAmount ? (
-                    <>
-                      <Check className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>Copied ₹{amountToPay}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5 text-slate-500" />
-                      <span>Copy ₹{amountToPay}</span>
-                    </>
-                  )}
                 </button>
               </div>
 
@@ -353,26 +288,6 @@ export const UpiPaymentModal: React.FC<UpiPaymentModalProps> = ({
                   )}
                 </button>
               </div>
-
-              {/* Copy Direct UPI Payment Link */}
-              <button
-                type="button"
-                onClick={handleCopyLink}
-                className="w-full py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-200"
-                title="Copy raw UPI payment link for UPI apps"
-              >
-                {copiedLink ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Copied UPI Link</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Copy UPI Link</span>
-                  </>
-                )}
-              </button>
             </div>
 
             {/* Submit Reference / UTR Section */}
