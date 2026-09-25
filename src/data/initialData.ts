@@ -18,7 +18,7 @@ export const INITIAL_SETTINGS: BuildingSettings = {
   adminPhone: '8077649394',
   adminEmail: 'shariqalig881@gmail.com',
   adminPassword: 'My1Build2@3',
-  adminFlatId: 'flat-101',
+  adminFlatId: 'flat-104',
 };
 
 // Flats in the building

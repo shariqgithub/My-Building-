@@ -370,7 +370,7 @@ export const deduplicateFlatsAndCycles = (
 
     for (const f of groupFlats) {
       let score = 0;
-      if (f.id === `flat-${key.replace('flat-', '')}` || f.id === key || normalizeFlatNumber(f.id) === key) score += 5;
+      if (f.id === `flat-${key.replace('flat-', '')}` || f.id === key) score += 5;
       if (f.pin && f.pin.trim().length >= 4) score += 3;
       if (f.phone && f.phone.includes('8077649394')) score += 3;
       if (f.ownerName && !f.ownerName.toLowerCase().includes('owner') && !f.ownerName.toLowerCase().includes('resident')) score += 3;
@@ -425,10 +425,12 @@ export const deduplicateFlatsAndCycles = (
 
     for (const r of c.readings) {
       let canonicalId = reassignedMap[r.flatId] || r.flatId;
-      let targetFlat = cleanedFlats.find((f) => f.id === canonicalId || normalizeFlatNumber(f.id) === normalizeFlatNumber(canonicalId));
-      if (!targetFlat) {
-        const norm = normalizeFlatNumber(r.flatNumber || r.flatId);
-        targetFlat = cleanedFlats.find((f) => normalizeFlatNumber(f.flatNumber) === norm || normalizeFlatNumber(f.id) === norm);
+      // 1. Match by exact flat ID
+      let targetFlat = cleanedFlats.find((f) => f.id === canonicalId);
+      // 2. If not found by ID and r has flatNumber, match strictly by human flatNumber
+      if (!targetFlat && r.flatNumber) {
+        const norm = normalizeFlatNumber(r.flatNumber);
+        targetFlat = cleanedFlats.find((f) => normalizeFlatNumber(f.flatNumber) === norm);
       }
 
       // If no valid flat exists in cleanedFlats, discard phantom/orphan reading
@@ -577,7 +579,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!Array.isArray(list) || list.length === 0) list = INITIAL_FLATS;
 
       list = list.map((f) => {
-        if (f.id === 'flat-101' && (!f.phone || f.phone === '9820111101')) {
+        if ((normalizeFlatNumber(f.flatNumber) === 'flat-101' || f.flatNumber.trim() === '101') && (!f.phone || f.phone === '9820111101')) {
           return { ...f, phone: '8077649394', ownerName: 'Mohammad Shariq Ansari' };
         }
         if ((f.id === 'flat-402' || normalizeFlatNumber(f.flatNumber) === 'flat-402') && (!f.phone || f.phone === '9820111402')) {
@@ -734,12 +736,20 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && (parsed.isPhoneVerified || parsed.role)) {
+          // Auto-heal legacy session where Flat 101 was assigned id 'flat-101' (which collides with Shops-02)
+          if ((parsed.flatNumber === '101' || parsed.flatNumber === 'Flat 101') && parsed.flatId === 'flat-101') {
+            parsed.flatId = 'flat-104';
+            try {
+              localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(parsed));
+            } catch {}
+          }
           if (parsed.role === 'admin') {
             return {
               ...parsed,
               name: FIXED_ADMIN_NAME,
               phone: FIXED_ADMIN_PHONE,
-              flatId: 'flat-101',
+              flatId: parsed.flatId && parsed.flatId !== 'flat-101' ? parsed.flatId : 'flat-104',
+              flatNumber: parsed.flatNumber || '101',
             };
           }
           return parsed;
@@ -835,7 +845,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
             if (cloudFlats.length > 0) {
               cloudFlats = cloudFlats.map((f: FlatInfo) => {
-                if (f.id === 'flat-101' && (!f.phone || f.phone === '9820111101')) {
+                if ((normalizeFlatNumber(f.flatNumber) === 'flat-101' || f.flatNumber.trim() === '101') && (!f.phone || f.phone === '9820111101')) {
                   return { ...f, phone: '8077649394', ownerName: 'Mohammad Shariq Ansari' };
                 }
                 return f;
@@ -2105,6 +2115,19 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return await saveToCloud(undefined, updatedFlats);
   };
 
+  // Helper to reliably get admin's primary flat (Flat 101) regardless of Firestore ID naming
+  const getAdminPrimaryFlat = (): FlatInfo => {
+    const f101 = flats.find((f) => normalizeFlatNumber(f.flatNumber) === 'flat-101' || f.flatNumber.trim() === '101');
+    if (f101) return f101;
+    const byPhone = flats.find((f) => isPhoneMatch(f.phone, FIXED_ADMIN_PHONE));
+    if (byPhone) return byPhone;
+    if (settings.adminFlatId) {
+      const bySettings = flats.find((f) => f.id === settings.adminFlatId && !f.flatNumber.toLowerCase().includes('shop'));
+      if (bySettings) return bySettings;
+    }
+    return flats[0];
+  };
+
   const loginResidentWithPin = (phone: string, pin: string, specificFlatId?: string) => {
     const rawClean = phone.replace(/\D/g, '');
     const tenDigit = rawClean.length > 10 ? rawClean.slice(-10) : rawClean;
@@ -2125,12 +2148,14 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const configuredPin = settings.adminPin?.trim() || INITIAL_SETTINGS.adminPin?.trim() || '1234';
       const configuredPwd = settings.adminPassword || INITIAL_SETTINGS.adminPassword || 'My1Build2@3';
       if (trimmedPin === configuredPin || trimmedPin === configuredPwd) {
+        const adminPrimary = getAdminPrimaryFlat();
         const session: UserSession = {
           role: 'admin',
           name: FIXED_ADMIN_NAME,
           phone: FIXED_ADMIN_PHONE,
           email: settings.adminEmail || INITIAL_SETTINGS.adminEmail,
-          flatId: settings.adminFlatId || 'flat-101',
+          flatId: adminPrimary.id,
+          flatNumber: adminPrimary.flatNumber,
           isCommitteeMember: true,
           isPhoneVerified: true,
         };
@@ -2208,12 +2233,14 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           cleanPhone.endsWith(adminCleanPhone) ||
           adminCleanPhone.endsWith(cleanPhone)))
     ) {
+      const adminPrimary = getAdminPrimaryFlat();
       const session: UserSession = {
         role: 'admin',
         name: FIXED_ADMIN_NAME,
         phone: FIXED_ADMIN_PHONE,
         email: settings.adminEmail || INITIAL_SETTINGS.adminEmail,
-        flatId: settings.adminFlatId || 'flat-101',
+        flatId: adminPrimary.id,
+        flatNumber: adminPrimary.flatNumber,
         isCommitteeMember: true,
         isPhoneVerified: true,
       };
@@ -2271,12 +2298,14 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const configuredPwd = settings.adminPassword || INITIAL_SETTINGS.adminPassword || 'My1Build2@3';
     const trimmed = pinOrPassword?.trim();
     if (trimmed && (trimmed === configuredPin || trimmed === configuredPwd)) {
+      const adminPrimary = getAdminPrimaryFlat();
       const session: UserSession = {
         role: 'admin',
         name: FIXED_ADMIN_NAME,
         phone: FIXED_ADMIN_PHONE,
         email: settings.adminEmail || INITIAL_SETTINGS.adminEmail,
-        flatId: settings.adminFlatId || INITIAL_SETTINGS.adminFlatId || 'flat-101',
+        flatId: adminPrimary.id,
+        flatNumber: adminPrimary.flatNumber,
         isCommitteeMember: true,
         isPhoneVerified: true,
       };
@@ -2327,12 +2356,14 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       };
     }
 
+    const adminPrimary = getAdminPrimaryFlat();
     const session: UserSession = {
       role: 'admin',
       name: FIXED_ADMIN_NAME,
       phone: FIXED_ADMIN_PHONE,
       email: settings.adminEmail || INITIAL_SETTINGS.adminEmail,
-      flatId: settings.adminFlatId || INITIAL_SETTINGS.adminFlatId || 'flat-101',
+      flatId: adminPrimary.id,
+      flatNumber: adminPrimary.flatNumber,
       isCommitteeMember: true,
       isPhoneVerified: true,
     };
@@ -2441,12 +2472,14 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           sessionStorage.removeItem('admin_email_otp_cache');
         } catch {}
 
+        const adminPrimary = getAdminPrimaryFlat();
         const session: UserSession = {
           role: 'admin',
           name: FIXED_ADMIN_NAME,
           phone: FIXED_ADMIN_PHONE,
           email: targetEmail,
-          flatId: settings.adminFlatId || INITIAL_SETTINGS.adminFlatId || 'flat-101',
+          flatId: adminPrimary.id,
+          flatNumber: adminPrimary.flatNumber,
           isCommitteeMember: true,
           isPhoneVerified: true,
         };
@@ -2490,14 +2523,17 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     if (!targetFlat) {
       targetFlat =
+        flats.find((f) => normalizeFlatNumber(f.flatNumber) === 'flat-101') ||
         adminFlats[0] ||
         flats.find((f) => isPhoneMatch(f.phone, adminClean)) ||
-        flats.find((f) => f.id === settings.adminFlatId || normalizeFlatNumber(f.flatNumber) === 'flat-101') ||
-        flats.find((f) => isPhoneMatch(f.phone, FIXED_ADMIN_PHONE)) ||
-        flats[0];
+        getAdminPrimaryFlat();
     }
 
-    const isTargetAdminFlat = isPhoneMatch(targetFlat.phone, adminClean) || targetFlat.id === settings.adminFlatId;
+    const isTargetAdminFlat =
+      isPhoneMatch(targetFlat.phone, adminClean) ||
+      targetFlat.id === settings.adminFlatId ||
+      normalizeFlatNumber(targetFlat.flatNumber) === 'flat-101' ||
+      normalizeFlatNumber(targetFlat.flatNumber) === 'flat-402';
 
     setAndUnlockSession({
       role: 'resident',
@@ -2512,12 +2548,14 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const switchToAdminView = () => {
+    const adminPrimary = getAdminPrimaryFlat();
     setAndUnlockSession({
       role: 'admin',
       name: FIXED_ADMIN_NAME,
       phone: FIXED_ADMIN_PHONE,
       email: settings.adminEmail || INITIAL_SETTINGS.adminEmail,
-      flatId: settings.adminFlatId || 'flat-101',
+      flatId: adminPrimary.id,
+      flatNumber: adminPrimary.flatNumber,
       isCommitteeMember: true,
       isPhoneVerified: true,
     });
@@ -2542,8 +2580,6 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return (
         norm === 'flat-101' ||
         norm === 'flat-402' ||
-        f.id === 'flat-101' ||
-        f.id === 'flat-402' ||
         f.flatNumber.trim() === '101' ||
         f.flatNumber.trim() === '402'
       );
@@ -2583,9 +2619,14 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     // 2. If in Resident role, check if active flat is one of admin's personal units
-    const currentFlat = flats.find(
-      (f) => f.id === currentSession.flatId || normalizeFlatNumber(f.flatNumber) === normalizeFlatNumber(currentSession.flatNumber)
-    );
+    let currentFlat: FlatInfo | undefined;
+    if (currentSession.flatNumber) {
+      const cleanNum = normalizeFlatNumber(currentSession.flatNumber);
+      currentFlat = flats.find((f) => normalizeFlatNumber(f.flatNumber) === cleanNum);
+    }
+    if (!currentFlat && currentSession.flatId) {
+      currentFlat = flats.find((f) => f.id === currentSession.flatId);
+    }
 
     const currentNorm = currentFlat ? normalizeFlatNumber(currentFlat.flatNumber) : '';
     const isCurrentAdminUnit = currentNorm === 'flat-101' || currentNorm === 'flat-402';

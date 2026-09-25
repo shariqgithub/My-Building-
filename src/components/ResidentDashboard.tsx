@@ -95,16 +95,20 @@ export const ResidentDashboard: React.FC = () => {
   const [pinChangeError, setPinChangeError] = useState('');
   const [pinChangeSuccess, setPinChangeSuccess] = useState('');
 
-  // Find flat details: resilient matching by id, or by flatNumber (including shops -2 vs Shops -02)
+  // Find flat details: match by flatNumber first if available to avoid id-number collisions (e.g. database ID 'flat-101' belongs to Shops-02, whereas flatNumber '101' is Flat 101)
   const flat = useMemo(() => {
-    if (currentSession?.flatId) {
-      const foundById = flats.find((f) => f.id === currentSession.flatId || normalizeFlatNumber(f.id) === normalizeFlatNumber(currentSession.flatId));
-      if (foundById) return foundById;
-    }
+    // 1. If flatNumber is in session, find the flat strictly matching this human flat number
     if (currentSession?.flatNumber) {
       const cleanNum = normalizeFlatNumber(currentSession.flatNumber);
-      const foundByNum = flats.find((f) => normalizeFlatNumber(f.flatNumber) === cleanNum || normalizeFlatNumber(f.id) === cleanNum);
+      const foundByNum = flats.find(
+        (f) => normalizeFlatNumber(f.flatNumber) === cleanNum || f.flatNumber.trim() === currentSession.flatNumber.trim()
+      );
       if (foundByNum) return foundByNum;
+    }
+    // 2. Otherwise match by exact flatId
+    if (currentSession?.flatId) {
+      const foundById = flats.find((f) => f.id === currentSession.flatId);
+      if (foundById) return foundById;
     }
     return flats[0];
   }, [flats, currentSession?.flatId, currentSession?.flatNumber]);
@@ -112,14 +116,17 @@ export const ResidentDashboard: React.FC = () => {
   // Resilient activeReading calculation: strictly uses authoritative recorded cycle amounts so it matches Admin exactly
   const activeReading = useMemo(() => {
     if (!currentViewCycle || !flat) return undefined;
-    const flatNorm = normalizeFlatNumber(flat.flatNumber || flat.id);
-    const found = currentViewCycle.readings.find(
-      (r) =>
-        r.flatId === flat.id ||
-        r.flatNumber === flat.flatNumber ||
-        normalizeFlatNumber(r.flatId) === flatNorm ||
-        normalizeFlatNumber(r.flatNumber) === flatNorm
-    );
+    // 1. Primary lookup by exact relational flatId
+    let found = currentViewCycle.readings.find((r) => r.flatId === flat.id);
+    // 2. Fallback lookup strictly by human flatNumber (NEVER match r.flatId by flat number)
+    if (!found && flat.flatNumber) {
+      const flatNorm = normalizeFlatNumber(flat.flatNumber);
+      found = currentViewCycle.readings.find(
+        (r) =>
+          r.flatNumber === flat.flatNumber ||
+          (Boolean(r.flatNumber) && normalizeFlatNumber(r.flatNumber) === flatNorm)
+      );
+    }
     const isShop = (flat.flatNumber || '').toLowerCase().includes('shop') || (flat.id || '').toLowerCase().includes('shop');
 
     if (found) {
