@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useBuilding, normalizeFlatNumber } from '../context/BuildingContext';
 import { UpiPaymentModal } from './UpiPaymentModal';
 import { BillInvoiceModal } from './BillInvoiceModal';
@@ -60,11 +60,29 @@ export const ResidentDashboard: React.FC = () => {
 
   const [showUpiModal, setShowUpiModal] = useState(false);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [selectedCycleId, setSelectedCycleId] = useState<string>(() => activeCycle?.id || '');
+
+  useEffect(() => {
+    if (activeCycle?.id) {
+      setSelectedCycleId(activeCycle.id);
+    }
+  }, [activeCycle?.id]);
+
+  const currentViewCycle = useMemo(() => {
+    return cycles.find((c) => c.id === selectedCycleId) || activeCycle || cycles[0];
+  }, [cycles, selectedCycleId, activeCycle]);
+
   const [selectedCycleForInvoice, setSelectedCycleForInvoice] = useState(activeCycle);
+
+  useEffect(() => {
+    if (currentViewCycle) {
+      setSelectedCycleForInvoice(currentViewCycle);
+    }
+  }, [currentViewCycle]);
 
   // Filter for historical building expenses tab
   const [selectedExpenseMonthKey, setSelectedExpenseMonthKey] = useState<string>(() => {
-    return activeCycle?.monthKey || '2026-09';
+    return activeCycle?.monthKey || '2026-08';
   });
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [expenseSearchQuery, setExpenseSearchQuery] = useState('');
@@ -91,26 +109,25 @@ export const ResidentDashboard: React.FC = () => {
     return flats[0];
   }, [flats, currentSession?.flatId, currentSession?.flatNumber]);
 
-  // Resilient activeReading calculation so no unit ever shows blank or incorrect charges
+  // Resilient activeReading calculation: strictly uses authoritative recorded cycle amounts so it matches Admin exactly
   const activeReading = useMemo(() => {
-    if (!activeCycle || !flat) return undefined;
+    if (!currentViewCycle || !flat) return undefined;
     const flatNorm = normalizeFlatNumber(flat.flatNumber || flat.id);
-    const found = activeCycle.readings.find(
+    const found = currentViewCycle.readings.find(
       (r) =>
         r.flatId === flat.id ||
         r.flatNumber === flat.flatNumber ||
         normalizeFlatNumber(r.flatId) === flatNorm ||
         normalizeFlatNumber(r.flatNumber) === flatNorm
     );
-    const isShop = flat.flatNumber.toLowerCase().includes('shop') || flat.id.toLowerCase().includes('shop');
+    const isShop = (flat.flatNumber || '').toLowerCase().includes('shop') || (flat.id || '').toLowerCase().includes('shop');
 
     if (found) {
-      const rate = flat.customRatePerUnit !== undefined && flat.customRatePerUnit > 0
+      const rate = found.ratePerUnit ?? (flat.customRatePerUnit !== undefined && flat.customRatePerUnit > 0
         ? flat.customRatePerUnit
-        : (found.ratePerUnit || activeCycle.effectiveRatePerUnit || settings.defaultRatePerUnit || 9);
-      const energy = Math.round(found.unitsConsumed * rate);
-
-      // If commonMeterCharges or maintenanceCharges were explicitly set (including 0 when excluded), use that
+        : (currentViewCycle.effectiveRatePerUnit || settings.defaultRatePerUnit || 9));
+      const units = found.unitsConsumed ?? Math.max(0, (found.currentReading || 0) - (found.previousReading || 0));
+      const energy = found.calculatedAmount ?? Math.round(units * rate);
       const common = found.commonMeterCharges !== undefined
         ? found.commonMeterCharges
         : (isShop ? 0 : (settings.defaultCommonMeterCharges ?? 160));
@@ -124,29 +141,36 @@ export const ResidentDashboard: React.FC = () => {
           customSum += Number(val) || 0;
         });
       }
-      const total = energy + common + maint + customSum;
-      const pending = found.pendingAmount ?? 0;
-      const advance = found.advanceAmount ?? 0;
-      const net = Math.max(0, total + pending - advance);
-      const remaining = found.paidAmount !== undefined ? net - found.paidAmount : net;
+
+      // Authoritative amounts recorded in the cycle
+      const total = found.totalBillAmount !== undefined ? found.totalBillAmount : (energy + common + maint + customSum);
+      const pending = found.pendingAmount ?? (found.previousBalance && found.previousBalance > 0 ? found.previousBalance : 0);
+      const advance = found.advanceAmount ?? (found.previousBalance && found.previousBalance < 0 ? Math.abs(found.previousBalance) : 0);
+      const net = found.netPayableAmount !== undefined ? found.netPayableAmount : Math.max(0, total + pending - advance);
+      const remaining = found.remainingBalance !== undefined ? found.remainingBalance : (found.paidAmount !== undefined ? net - found.paidAmount : net);
+      const advancePaid = found.advancePaid !== undefined ? found.advancePaid : (remaining < 0 ? Math.abs(remaining) : 0);
+
       return {
         ...found,
+        unitsConsumed: units,
         ratePerUnit: rate,
         calculatedAmount: energy,
         commonMeterCharges: common,
         maintenanceCharges: maint,
         totalBillAmount: total,
         netPayableAmount: net,
+        pendingAmount: pending,
+        advanceAmount: advance,
         remainingBalance: remaining > 0 ? remaining : 0,
-        advancePaid: remaining < 0 ? Math.abs(remaining) : 0,
+        advancePaid: advancePaid,
       };
     }
 
     // Resilient fallback reading if cycle is missing an entry
     const prev = flat.baselineReading || 0;
-    const rate = flat.customRatePerUnit || activeCycle.effectiveRatePerUnit || settings.defaultRatePerUnit || 9;
-    const commonChg = isShop ? 0 : (activeCycle.readings[0]?.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160);
-    const maintChg = isShop ? 0 : (activeCycle.readings[0]?.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110);
+    const rate = flat.customRatePerUnit || currentViewCycle.effectiveRatePerUnit || settings.defaultRatePerUnit || 9;
+    const commonChg = isShop ? 0 : (currentViewCycle.readings[0]?.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160);
+    const maintChg = isShop ? 0 : (currentViewCycle.readings[0]?.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110);
     const total = commonChg + maintChg;
     return {
       flatId: flat.id,
@@ -158,25 +182,38 @@ export const ResidentDashboard: React.FC = () => {
       calculatedAmount: 0,
       commonShareAmount: commonChg,
       commonMeterCharges: commonChg,
-      commonMeterLabel: activeCycle.readings[0]?.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light',
+      commonMeterLabel: currentViewCycle.readings[0]?.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light',
       maintenanceCharges: maintChg,
-      maintenanceLabel: activeCycle.readings[0]?.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning',
+      maintenanceLabel: currentViewCycle.readings[0]?.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning',
       totalBillAmount: total,
       netPayableAmount: total,
       remainingBalance: total,
       paymentStatus: 'unpaid' as const,
     };
-  }, [activeCycle, flat, settings]);
+  }, [currentViewCycle, flat, settings]);
 
   // Current Month Key for active cycle
-  const currentMonthKey = activeCycle?.monthKey || '2026-09';
+  const currentMonthKey = currentViewCycle?.monthKey || '2026-08';
 
-  // Building expenses visible to flat owners (strictly excludes the main electricity bill)
+  // Building expenses visible to flat owners (strictly excludes all government/main electricity bills)
   const residentExpenses = useMemo(() => {
     return expenses.filter((exp) => {
       if (exp.category === 'electricity_bill') return false;
       const titleLower = (exp.title || '').toLowerCase();
-      if (titleLower.includes('electricity bill') || titleLower.includes('govt electricity')) return false;
+      const notesLower = (exp.notes || '').toLowerCase();
+      const paidToLower = (exp.paidTo || '').toLowerCase();
+      const combined = `${titleLower} ${notesLower} ${paidToLower}`;
+      if (
+        combined.includes('electricity') ||
+        combined.includes('electric bill') ||
+        combined.includes('govt electricity') ||
+        combined.includes('msedcl') ||
+        combined.includes('mseb') ||
+        combined.includes('bijli') ||
+        combined.includes('power bill')
+      ) {
+        return false;
+      }
       return true;
     });
   }, [expenses]);
@@ -184,7 +221,7 @@ export const ResidentDashboard: React.FC = () => {
   // Current Month Building Expenses (visible to residents, excluding electricity bill)
   const currentMonthExpenses = useMemo(() => {
     const matched = residentExpenses.filter((exp) => {
-      if (exp.cycleId && activeCycle && exp.cycleId === activeCycle.id) return true;
+      if (exp.cycleId && currentViewCycle && exp.cycleId === currentViewCycle.id) return true;
       if (exp.monthKey && currentMonthKey && exp.monthKey === currentMonthKey) return true;
       if (exp.date && currentMonthKey && exp.date.startsWith(currentMonthKey)) return true;
       return false;
@@ -196,7 +233,7 @@ export const ResidentDashboard: React.FC = () => {
 
     // If no direct month match, show all society building expenses (excluding electricity bill)
     return [...residentExpenses].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [residentExpenses, currentMonthKey, activeCycle]);
+  }, [residentExpenses, currentMonthKey, currentViewCycle]);
 
   // Current month expenses total
   const currentMonthExpensesTotal = useMemo(() => {
@@ -316,9 +353,24 @@ export const ResidentDashboard: React.FC = () => {
             <KeyRound className="w-3.5 h-3.5 text-slate-500" />
             <span className="hidden sm:inline">Change PIN</span>
           </button>
-          <div className="hidden sm:block text-right">
+          <div className="text-right">
             <span className="text-[10px] text-slate-400 font-semibold uppercase block">Billing Month</span>
-            <span className="text-xs font-bold text-slate-800">{activeCycle.month}</span>
+            {cycles && cycles.length > 1 ? (
+              <select
+                value={currentViewCycle.id}
+                onChange={(e) => setSelectedCycleId(e.target.value)}
+                className="text-xs font-bold bg-white text-slate-900 border border-amber-300 rounded-lg px-2 py-1 shadow-2xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                title="Switch billing statement month"
+              >
+                {cycles.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.month}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="text-xs font-bold text-slate-800">{currentViewCycle.month}</span>
+            )}
           </div>
         </div>
       </div>
@@ -442,7 +494,7 @@ export const ResidentDashboard: React.FC = () => {
                 <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                   Current Statement
                 </span>
-                <span className="text-xs font-medium text-slate-500">• Due: {activeCycle.dueDate}</span>
+                <span className="text-xs font-medium text-slate-500">• Due: {currentViewCycle.dueDate}</span>
               </div>
 
               <div>
@@ -564,7 +616,7 @@ export const ResidentDashboard: React.FC = () => {
                 Object.entries(activeReading.customCharges).map(([key, val]) => {
                   const numVal = Number(val) || 0;
                   if (numVal <= 0) return null;
-                  const colMatch = activeCycle.customColumns?.find((c) => c.id === key || c.name === key);
+                  const colMatch = currentViewCycle.customColumns?.find((c) => c.id === key || c.name === key);
                   const label = colMatch ? colMatch.name : key;
                   return (
                     <div key={key} className="flex justify-between text-slate-700">
@@ -679,7 +731,7 @@ export const ResidentDashboard: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
-                  setSelectedCycleForInvoice(activeCycle);
+                  setSelectedCycleForInvoice(currentViewCycle);
                   setShowInvoiceModal(true);
                 }}
                 className="flex-1 py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs sm:text-sm font-semibold rounded-xl flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer min-w-40"
@@ -713,11 +765,11 @@ export const ResidentDashboard: React.FC = () => {
                     <Receipt className="w-4 h-4" />
                   </div>
                   <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-                    Current Month Building Expenses ({activeCycle.month})
+                    Current Month Building Expenses ({currentViewCycle.month})
                   </h3>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Direct transparency of all expenditures recorded by society admin for {activeCycle.month} (stairs cleaning, sewer cleaning, electrician, repairs, broomstick, etc.).
+                  Direct transparency of all expenditures recorded by society admin for {currentViewCycle.month} (stairs cleaning, sewer cleaning, electrician, repairs, broomstick, etc.).
                 </p>
               </div>
 
@@ -739,7 +791,7 @@ export const ResidentDashboard: React.FC = () => {
             {currentMonthExpenses.length === 0 ? (
               <div className="p-8 text-center bg-slate-50 rounded-xl border border-dashed border-slate-200">
                 <Receipt className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                <p className="text-xs font-semibold text-slate-700">No building expenses recorded yet for {activeCycle.month}.</p>
+                <p className="text-xs font-semibold text-slate-700">No building expenses recorded yet for {currentViewCycle.month}.</p>
                 <p className="text-[11px] text-slate-400 mt-0.5">
                   Whenever the society admin adds an expenditure (e.g. stairs cleaning, sewer cleaning, broomstick), it will instantly display here.
                 </p>
@@ -1362,7 +1414,7 @@ export const ResidentDashboard: React.FC = () => {
           isOpen={showUpiModal}
           onClose={() => setShowUpiModal(false)}
           reading={activeReading}
-          monthName={activeCycle.month}
+          monthName={currentViewCycle.month}
         />
       )}
 

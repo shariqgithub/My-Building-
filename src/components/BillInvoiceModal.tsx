@@ -41,15 +41,15 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
   const flat = flats.find((f) => f.id === reading.flatId || f.flatNumber === reading.flatNumber);
   const isAdmin = currentSession?.role === 'admin';
 
-  // Strict custom rate enforcement: if flat has special rate (e.g. 6 rs/unit for 101, 102, 103), always calculate with it
+  // Strict rate & bill alignment: use recorded official amounts if available, fallback with exact same formulas
   const effectiveRate =
-    flat?.customRatePerUnit !== undefined && flat.customRatePerUnit > 0
+    reading.ratePerUnit ??
+    (flat?.customRatePerUnit !== undefined && flat.customRatePerUnit > 0
       ? flat.customRatePerUnit
-      : reading.ratePerUnit;
+      : (cycle.effectiveRatePerUnit || 9));
   const effectiveEnergyAmount =
-    flat?.customRatePerUnit !== undefined && flat.customRatePerUnit > 0
-      ? Math.round(reading.unitsConsumed * flat.customRatePerUnit)
-      : (reading.calculatedAmount ?? Math.round(reading.unitsConsumed * effectiveRate));
+    reading.calculatedAmount ??
+    Math.round(reading.unitsConsumed * effectiveRate);
 
   const isShopUnit = (flat?.flatNumber || reading.flatNumber || '').toLowerCase().includes('shop') || (flat?.id || reading.flatId || '').toLowerCase().includes('shop');
   const commonChg = reading.commonMeterCharges !== undefined ? reading.commonMeterCharges : (isShopUnit ? 0 : (settings.defaultCommonMeterCharges ?? 160));
@@ -62,10 +62,10 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
     });
   }
 
-  const effectiveTotalBill = effectiveEnergyAmount + commonChg + maintChg + customSum;
-  const pendingAmt = reading.pendingAmount ?? 0;
-  const advanceAmt = reading.advanceAmount ?? 0;
-  const effectiveNetPayable = Math.max(0, effectiveTotalBill + pendingAmt - advanceAmt);
+  const effectiveTotalBill = reading.totalBillAmount ?? (effectiveEnergyAmount + commonChg + maintChg + customSum);
+  const pendingAmt = reading.pendingAmount ?? (reading.previousBalance && reading.previousBalance > 0 ? reading.previousBalance : 0);
+  const advanceAmt = reading.advanceAmount ?? (reading.previousBalance && reading.previousBalance < 0 ? Math.abs(reading.previousBalance) : 0);
+  const effectiveNetPayable = reading.netPayableAmount ?? Math.max(0, effectiveTotalBill + pendingAmt - advanceAmt);
 
   // Generate clean, self-contained HTML for printing and downloading
   const generatePrintableHtml = () => {

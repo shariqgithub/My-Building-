@@ -682,13 +682,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [activeCycleId, setActiveCycleId] = useState<string>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.ACTIVE_CYCLE_ID);
-      const isSavedInvalid = saved && (
-        saved.includes('2026-09') ||
-        saved.includes('2026-10') ||
-        saved.toLowerCase().includes('september') ||
-        saved.toLowerCase().includes('october')
-      );
-      if (saved && !isSavedInvalid) {
+      if (saved) {
         return saved;
       }
       return INITIAL_CYCLES[0] ? INITIAL_CYCLES[0].id : 'cycle-2026-08';
@@ -1766,13 +1760,26 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       customColumns: cycleCustomColumns,
     };
 
+    let finalUpdatedCycles: BillingCycle[] = [];
     setCycles((prev) => {
       const existingFiltered = prev.filter((c) => c.id !== nextCycleId);
       const combined = [...existingFiltered, newCycle];
-      return syncCycleBalances(combined);
+      finalUpdatedCycles = syncCycleBalances(combined);
+      return finalUpdatedCycles;
     });
 
     setActiveCycleId(nextCycleId);
+    try {
+      localStorage.setItem(STORAGE_KEYS.ACTIVE_CYCLE_ID, nextCycleId);
+      if (finalUpdatedCycles.length > 0) {
+        localStorage.setItem(STORAGE_KEYS.CYCLES, JSON.stringify(finalUpdatedCycles));
+      }
+    } catch {}
+
+    if (finalUpdatedCycles.length > 0) {
+      saveToCloud(undefined, undefined, finalUpdatedCycles, nextCycleId);
+    }
+
     addNotification(
       `New Billing Month Created: ${nextMonthName}`,
       `Created bill cycle for ${nextMonthName}. Remaining dues and advance credits have been automatically carried forward for each flat.`,
@@ -2018,6 +2025,14 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       localStorage.setItem(STORAGE_KEYS.CYCLES, JSON.stringify(synced));
     } catch {}
     return await saveToCloud(undefined, undefined, synced);
+  };
+
+  const handleSetActiveCycleId = (id: string) => {
+    setActiveCycleId(id);
+    try {
+      localStorage.setItem(STORAGE_KEYS.ACTIVE_CYCLE_ID, id);
+    } catch {}
+    saveToCloud(undefined, undefined, undefined, id);
   };
 
   const checkPhoneRegistration = (phone: string) => {
@@ -2951,7 +2966,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         lastCloudSync,
         saveToCloud,
         saveAllFlats,
-        setActiveCycleId,
+        setActiveCycleId: handleSetActiveCycleId,
         updateSettings,
         applyChargesToAllFlats,
         updateChargeLabels,
