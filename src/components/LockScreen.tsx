@@ -253,7 +253,11 @@ export const LockScreen: React.FC = () => {
                         : 'bg-amber-100 text-amber-800'
                     }`}
                   >
-                    {isAdmin ? 'Secretary / Admin' : `Flat ${flat?.flatNumber || currentSession?.flatNumber}`}
+                    {isAdmin
+                      ? 'Secretary / Admin'
+                      : ((flat?.flatNumber || currentSession?.flatNumber) || '').toLowerCase().includes('shop') || ((flat?.flatNumber || currentSession?.flatNumber) || '').toLowerCase().startsWith('flat')
+                      ? (flat?.flatNumber || currentSession?.flatNumber)
+                      : `Flat ${flat?.flatNumber || currentSession?.flatNumber}`}
                   </span>
                 </div>
                 <div className="text-[11px] text-slate-500 font-mono">

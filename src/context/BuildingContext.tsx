@@ -333,6 +333,23 @@ export const normalizeFlatNumber = (num: string): string => {
   return clean;
 };
 
+// Canonical uniform flat IDs (e.g. '101' -> 'flat-101', '01' -> 'flat-01', 'Shops-02' -> 'shop-02')
+export const getCanonicalFlatId = (num: string): string => {
+  if (!num) return '';
+  const clean = num.trim().toLowerCase();
+  if (clean.includes('shop')) {
+    const digits = clean.replace(/\D/g, '');
+    const n = digits ? parseInt(digits, 10) : 2;
+    return `shop-${n < 10 ? '0' + n : n}`;
+  }
+  const digits = clean.replace(/\D/g, '');
+  if (digits) {
+    const n = parseInt(digits, 10);
+    return `flat-${n < 10 ? '0' + n : n}`;
+  }
+  return clean;
+};
+
 export interface DeduplicateResult {
   cleanedFlats: FlatInfo[];
   cleanedCycles: BillingCycle[];
@@ -358,8 +375,17 @@ export const deduplicateFlatsAndCycles = (
   const cleanedFlats: FlatInfo[] = [];
 
   groups.forEach((groupFlats, key) => {
+    const canonicalId = getCanonicalFlatId(groupFlats[0].flatNumber);
+
     if (groupFlats.length === 1) {
-      cleanedFlats.push(groupFlats[0]);
+      const single = groupFlats[0];
+      if (single.id !== canonicalId) {
+        reassignedMap[single.id] = canonicalId;
+      }
+      cleanedFlats.push({
+        ...single,
+        id: canonicalId,
+      });
       return;
     }
 
@@ -370,14 +396,14 @@ export const deduplicateFlatsAndCycles = (
 
     for (const f of groupFlats) {
       let score = 0;
-      if (f.id === `flat-${key.replace('flat-', '')}` || f.id === key) score += 5;
+      if (f.id === canonicalId) score += 10;
       if (f.pin && f.pin.trim().length >= 4) score += 3;
       if (f.phone && f.phone.includes('8077649394')) score += 3;
       if (f.ownerName && !f.ownerName.toLowerCase().includes('owner') && !f.ownerName.toLowerCase().includes('resident')) score += 3;
 
       for (const c of rawCycles) {
         const r = c.readings.find((entry) => entry.flatId === f.id || entry.flatNumber === f.flatNumber);
-        if (r && r.flatId === f.id) {
+        if (r && (r.flatId === f.id || r.flatNumber === f.flatNumber)) {
           score += 1;
           if ((r.unitsConsumed || 0) > 0) score += 15;
           if ((r.currentReading || 0) > (r.previousReading || 0)) score += 15;
@@ -393,23 +419,21 @@ export const deduplicateFlatsAndCycles = (
     }
 
     // Merge best fields from other duplicate flats
-    let mergedFlat: FlatInfo = { ...bestFlat };
+    let mergedFlat: FlatInfo = { ...bestFlat, id: canonicalId };
     for (const other of groupFlats) {
-      if (other.id !== bestFlat.id) {
-        reassignedMap[other.id] = bestFlat.id;
-        if (!mergedFlat.pin && other.pin) mergedFlat.pin = other.pin;
-        if (!mergedFlat.customRatePerUnit && other.customRatePerUnit) {
-          mergedFlat.customRatePerUnit = other.customRatePerUnit;
-        }
-        if ((!mergedFlat.phone || mergedFlat.phone.length < 10) && other.phone) {
-          mergedFlat.phone = other.phone;
-        }
-        if (
-          (!mergedFlat.ownerName || mergedFlat.ownerName.toLowerCase().includes('resident') || mergedFlat.ownerName.toLowerCase().includes('owner')) &&
-          other.ownerName
-        ) {
-          mergedFlat.ownerName = other.ownerName;
-        }
+      reassignedMap[other.id] = canonicalId;
+      if (!mergedFlat.pin && other.pin) mergedFlat.pin = other.pin;
+      if (!mergedFlat.customRatePerUnit && other.customRatePerUnit) {
+        mergedFlat.customRatePerUnit = other.customRatePerUnit;
+      }
+      if ((!mergedFlat.phone || mergedFlat.phone.length < 10) && other.phone) {
+        mergedFlat.phone = other.phone;
+      }
+      if (
+        (!mergedFlat.ownerName || mergedFlat.ownerName.toLowerCase().includes('resident') || mergedFlat.ownerName.toLowerCase().includes('owner')) &&
+        other.ownerName
+      ) {
+        mergedFlat.ownerName = other.ownerName;
       }
     }
 
@@ -417,20 +441,22 @@ export const deduplicateFlatsAndCycles = (
   });
 
   // Now clean cycles:
-  // 1. In every cycle, if reading has flatId in reassignedMap, migrate to canonical flatId
-  // 2. If cycle has multiple readings for canonical flatId, pick the best one
+  // 1. In every cycle, match readings strictly by human flatNumber FIRST (authoritative)
+  // 2. Fallback to reassignedMap and exact canonical ID
   // 3. Ensure every flat in cleanedFlats has a reading entry
   const cleanedCycles = rawCycles.map((c) => {
     const readingMap = new Map<string, FlatReadingEntry>();
 
     for (const r of c.readings) {
-      let canonicalId = reassignedMap[r.flatId] || r.flatId;
-      // 1. Match by exact flat ID
-      let targetFlat = cleanedFlats.find((f) => f.id === canonicalId);
-      // 2. If not found by ID and r has flatNumber, match strictly by human flatNumber
-      if (!targetFlat && r.flatNumber) {
-        const norm = normalizeFlatNumber(r.flatNumber);
-        targetFlat = cleanedFlats.find((f) => normalizeFlatNumber(f.flatNumber) === norm);
+      // 1. Match by human flatNumber FIRST (prevents Shops-02 vs Flat 101 collision)
+      let targetFlat = r.flatNumber
+        ? cleanedFlats.find((f) => normalizeFlatNumber(f.flatNumber) === normalizeFlatNumber(r.flatNumber))
+        : undefined;
+
+      // 2. If not found by flatNumber, match by canonical ID or reassignedMap
+      if (!targetFlat) {
+        const canonicalId = reassignedMap[r.flatId] || r.flatId;
+        targetFlat = cleanedFlats.find((f) => f.id === canonicalId);
       }
 
       // If no valid flat exists in cleanedFlats, discard phantom/orphan reading
@@ -438,7 +464,7 @@ export const deduplicateFlatsAndCycles = (
         continue;
       }
 
-      canonicalId = targetFlat.id;
+      const canonicalId = targetFlat.id;
       const flatNum = targetFlat.flatNumber;
 
       const updatedReading: FlatReadingEntry = {
@@ -466,14 +492,28 @@ export const deduplicateFlatsAndCycles = (
       }
     }
 
+    // Find representative non-shop charges and labels across existing readings
+    const refReading = c.readings.find((r) => {
+      const isShop = (r.flatNumber || '').toLowerCase().includes('shop') || (r.flatId || '').toLowerCase().includes('shop');
+      return !isShop && ((r.commonMeterCharges ?? 0) > 0 || (r.maintenanceCharges ?? 0) > 0);
+    }) || c.readings.find((r) => {
+      const isShop = (r.flatNumber || '').toLowerCase().includes('shop') || (r.flatId || '').toLowerCase().includes('shop');
+      return !isShop;
+    });
+
+    const defaultCommonCharges = refReading?.commonMeterCharges !== undefined ? refReading.commonMeterCharges : 160;
+    const defaultMaintCharges = refReading?.maintenanceCharges !== undefined ? refReading.maintenanceCharges : 110;
+    const defaultCommonLabel = refReading?.commonMeterLabel || 'Water & stairs light';
+    const defaultMaintLabel = refReading?.maintenanceLabel || 'Cleaning';
+
     // Ensure all flats in cleanedFlats have a reading entry in this cycle
     for (const f of cleanedFlats) {
       if (!readingMap.has(f.id)) {
         const prev = f.baselineReading || 0;
         const rate = f.customRatePerUnit || c.effectiveRatePerUnit || 9;
         const isShopUnit = f.flatNumber.toLowerCase().includes('shop') || f.id.toLowerCase().includes('shop');
-        const commonChg = isShopUnit ? 0 : (c.readings[0]?.commonMeterCharges ?? 160);
-        const maintChg = isShopUnit ? 0 : (c.readings[0]?.maintenanceCharges ?? 110);
+        const commonChg = isShopUnit ? 0 : defaultCommonCharges;
+        const maintChg = isShopUnit ? 0 : defaultMaintCharges;
         const total = commonChg + maintChg;
         readingMap.set(f.id, {
           flatId: f.id,
@@ -485,9 +525,9 @@ export const deduplicateFlatsAndCycles = (
           calculatedAmount: 0,
           commonShareAmount: commonChg,
           commonMeterCharges: commonChg,
-          commonMeterLabel: 'Water & stairs light',
+          commonMeterLabel: defaultCommonLabel,
           maintenanceCharges: maintChg,
-          maintenanceLabel: 'Cleaning',
+          maintenanceLabel: defaultMaintLabel,
           totalBillAmount: total,
           netPayableAmount: total,
           remainingBalance: total,
@@ -505,8 +545,8 @@ export const deduplicateFlatsAndCycles = (
           const rate = f.customRatePerUnit;
           const energy = Math.round(r.unitsConsumed * rate);
           const isShopUnit = f.flatNumber.toLowerCase().includes('shop') || f.id.toLowerCase().includes('shop');
-          const common = r.commonMeterCharges !== undefined ? r.commonMeterCharges : (isShopUnit ? 0 : 160);
-          const maint = r.maintenanceCharges !== undefined ? r.maintenanceCharges : (isShopUnit ? 0 : 110);
+          const common = r.commonMeterCharges !== undefined ? r.commonMeterCharges : (isShopUnit ? 0 : defaultCommonCharges);
+          const maint = r.maintenanceCharges !== undefined ? r.maintenanceCharges : (isShopUnit ? 0 : defaultMaintCharges);
           let customSum = 0;
           if (r.customCharges) {
             Object.values(r.customCharges).forEach((val) => {
@@ -736,20 +776,55 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && (parsed.isPhoneVerified || parsed.role)) {
-          // Auto-heal legacy session where Flat 101 was assigned id 'flat-101' (which collides with Shops-02)
-          if ((parsed.flatNumber === '101' || parsed.flatNumber === 'Flat 101') && parsed.flatId === 'flat-101') {
-            parsed.flatId = 'flat-104';
-            try {
-              localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(parsed));
-            } catch {}
+          // Auto-heal sessions to canonical IDs
+          if (
+            parsed.flatNumber === '402' ||
+            parsed.flatId === 'flat-402'
+          ) {
+            parsed.flatId = 'flat-402';
+            parsed.flatNumber = '402';
+            parsed.name = 'Mr. Shariq Ansari';
+            parsed.phone = FIXED_ADMIN_PHONE;
+            parsed.isCommitteeMember = true;
+          } else if (
+            parsed.flatId === 'flat-101' ||
+            parsed.flatNumber === '101' ||
+            parsed.flatNumber === 'Flat 101' ||
+            parsed.flatId === 'flat-104' ||
+            (parsed.phone && parsed.phone.includes('8077649394') && (parsed.role === 'admin' || !parsed.flatNumber))
+          ) {
+            parsed.flatId = 'flat-101';
+            parsed.flatNumber = '101';
+            parsed.name = 'Mr. Shariq Ansari';
+            parsed.phone = FIXED_ADMIN_PHONE;
+            parsed.isCommitteeMember = true;
+          } else if (
+            parsed.flatNumber === '01' ||
+            parsed.flatId === 'flat-01'
+          ) {
+            parsed.flatId = 'flat-01';
+            parsed.flatNumber = '01';
+            parsed.name = 'Mr. Bilal';
+            parsed.phone = '9540293786';
+          } else if (
+            (parsed.flatNumber || '').toLowerCase().includes('shop') ||
+            (parsed.flatId || '').toLowerCase().includes('shop')
+          ) {
+            parsed.flatId = 'shop-02';
+            parsed.flatNumber = 'Shops-02';
+            parsed.name = 'Mr. Bilal';
+            parsed.phone = '9540293786';
           }
+          try {
+            localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(parsed));
+          } catch {}
           if (parsed.role === 'admin') {
             return {
               ...parsed,
               name: FIXED_ADMIN_NAME,
               phone: FIXED_ADMIN_PHONE,
-              flatId: parsed.flatId && parsed.flatId !== 'flat-101' ? parsed.flatId : 'flat-104',
-              flatNumber: parsed.flatNumber || '101',
+              flatId: 'flat-101',
+              flatNumber: '101',
             };
           }
           return parsed;
@@ -2117,7 +2192,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Helper to reliably get admin's primary flat (Flat 101) regardless of Firestore ID naming
   const getAdminPrimaryFlat = (): FlatInfo => {
-    const f101 = flats.find((f) => normalizeFlatNumber(f.flatNumber) === 'flat-101' || f.flatNumber.trim() === '101');
+    const f101 = flats.find((f) => normalizeFlatNumber(f.flatNumber) === 'flat-101' || f.flatNumber.trim() === '101' || f.id === 'flat-101');
     if (f101) return f101;
     const byPhone = flats.find((f) => isPhoneMatch(f.phone, FIXED_ADMIN_PHONE));
     if (byPhone) return byPhone;
@@ -2125,7 +2200,8 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const bySettings = flats.find((f) => f.id === settings.adminFlatId && !f.flatNumber.toLowerCase().includes('shop'));
       if (bySettings) return bySettings;
     }
-    return flats[0];
+    const nonShop = flats.find((f) => !f.flatNumber.toLowerCase().includes('shop') && !f.id.toLowerCase().includes('shop'));
+    return nonShop || flats[0];
   };
 
   const loginResidentWithPin = (phone: string, pin: string, specificFlatId?: string) => {
@@ -2164,7 +2240,14 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     }
 
-    let targetFlat = specificFlatId ? flats.find((f) => f.id === specificFlatId) : matchingFlats[0];
+    let targetFlat = specificFlatId
+      ? flats.find(
+          (f) =>
+            f.id === specificFlatId ||
+            normalizeFlatNumber(f.flatNumber) === normalizeFlatNumber(specificFlatId) ||
+            f.flatNumber.trim() === specificFlatId.trim()
+        )
+      : matchingFlats[0];
     if (!targetFlat && matchingFlats.length > 0) {
       targetFlat = matchingFlats[0];
     }
@@ -2272,7 +2355,11 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const loginDirectlyAsFlat = (flatId: string, customPhone?: string) => {
-    const targetFlat = flats.find((f) => f.id === flatId) || flats[0];
+    const targetFlat =
+      flats.find((f) => f.id === flatId) ||
+      flats.find((f) => normalizeFlatNumber(f.flatNumber) === normalizeFlatNumber(flatId)) ||
+      flats.find((f) => f.flatNumber.trim() === flatId.trim()) ||
+      getAdminPrimaryFlat();
     const session: UserSession = {
       role: 'resident',
       flatId: targetFlat.id,

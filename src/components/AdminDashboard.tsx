@@ -114,7 +114,7 @@ export const AdminDashboard: React.FC = () => {
   // Dynamic Editable Field Names (e.g. "Water & stairs light" -> "Common meter")
   const [commonMeterLabel, setCommonMeterLabel] = useState<string>(() => {
     return (
-      activeCycle?.readings[0]?.commonMeterLabel ||
+      activeCycle?.readings.find((r) => r.commonMeterLabel)?.commonMeterLabel ||
       settings.defaultCommonMeterLabel ||
       'Water & stairs light'
     );
@@ -122,7 +122,7 @@ export const AdminDashboard: React.FC = () => {
 
   const [maintenanceLabel, setMaintenanceLabel] = useState<string>(() => {
     return (
-      activeCycle?.readings[0]?.maintenanceLabel ||
+      activeCycle?.readings.find((r) => r.maintenanceLabel)?.maintenanceLabel ||
       settings.defaultMaintenanceLabel ||
       'Cleaning'
     );
@@ -335,8 +335,8 @@ export const AdminDashboard: React.FC = () => {
     setMainPrevReading(activeCycle.mainMeter.mainMeterPreviousReading || 48000);
     setMainCurrReading(activeCycle.mainMeter.mainMeterCurrentReading || 50000);
 
-    const cycleLabel1 = activeCycle.readings[0]?.commonMeterLabel;
-    const cycleLabel2 = activeCycle.readings[0]?.maintenanceLabel;
+    const cycleLabel1 = activeCycle.readings.find((r) => r.commonMeterLabel)?.commonMeterLabel;
+    const cycleLabel2 = activeCycle.readings.find((r) => r.maintenanceLabel)?.maintenanceLabel;
     if (cycleLabel1) setCommonMeterLabel(cycleLabel1);
     else if (settings.defaultCommonMeterLabel) setCommonMeterLabel(settings.defaultCommonMeterLabel);
 
@@ -1376,7 +1376,9 @@ export const AdminDashboard: React.FC = () => {
                         <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
                           <div className="flex items-center gap-2">
                             <span className="inline-block px-2.5 py-1 rounded-lg bg-slate-900 text-white font-mono text-xs font-bold shadow-2xs">
-                              Flat {flat.flatNumber}
+                              {flat.flatNumber.toLowerCase().includes('shop') || flat.flatNumber.toLowerCase().startsWith('flat')
+                                ? flat.flatNumber
+                                : `Flat ${flat.flatNumber}`}
                             </span>
                             <div>
                               <div className="text-xs font-bold text-slate-900 leading-tight">
@@ -1817,7 +1819,9 @@ export const AdminDashboard: React.FC = () => {
                             <td className="p-2.5 font-bold text-slate-900 sticky left-0 bg-white z-10 shadow-[2px_0_4px_rgba(0,0,0,0.06)]">
                               <div className="flex items-center gap-1">
                                 <span className="inline-block px-2 py-0.5 rounded bg-slate-100 border border-slate-200 font-mono text-xs font-bold text-slate-900">
-                                  Flat {flat.flatNumber}
+                                  {flat.flatNumber.toLowerCase().includes('shop') || flat.flatNumber.toLowerCase().startsWith('flat')
+                                    ? flat.flatNumber
+                                    : `Flat ${flat.flatNumber}`}
                                 </span>
                                 <button
                                   type="button"
@@ -2477,7 +2481,9 @@ export const AdminDashboard: React.FC = () => {
                     <div>
                       <div className="flex items-center gap-1.5">
                         <span className="font-extrabold text-sm text-slate-900">
-                          Flat {flat?.flatNumber || reading.flatNumber}
+                          {((flat?.flatNumber || reading.flatNumber) || '').toLowerCase().includes('shop') || ((flat?.flatNumber || reading.flatNumber) || '').toLowerCase().startsWith('flat')
+                            ? (flat?.flatNumber || reading.flatNumber)
+                            : `Flat ${flat?.flatNumber || reading.flatNumber}`}
                         </span>
                         <span className="text-xs text-slate-500">({flat?.ownerName})</span>
                         <button
@@ -2867,7 +2873,9 @@ export const AdminDashboard: React.FC = () => {
                   >
                     <div className="flex items-center justify-between mb-1">
                       <span className="font-bold text-xs text-slate-800">
-                        Flat {flat.flatNumber}
+                        {flat.flatNumber.toLowerCase().includes('shop') || flat.flatNumber.toLowerCase().startsWith('flat')
+                          ? flat.flatNumber
+                          : `Flat ${flat.flatNumber}`}
                       </span>
                       {isSpecial && (
                         <span className="text-[9px] bg-amber-100 text-amber-800 font-bold px-1 rounded">
@@ -3663,7 +3671,9 @@ export const AdminDashboard: React.FC = () => {
                   <tr key={flat.id} className="hover:bg-slate-50/70">
                     <td className="p-2.5 font-bold font-mono text-slate-900">
                       <span className="inline-block px-2 py-0.5 rounded bg-slate-100 border border-slate-200">
-                        Flat {flat.flatNumber}
+                        {flat.flatNumber.toLowerCase().includes('shop') || flat.flatNumber.toLowerCase().startsWith('flat')
+                          ? flat.flatNumber
+                          : `Flat ${flat.flatNumber}`}
                       </span>
                     </td>
                     <td className="p-2.5 font-semibold text-slate-800">{flat.ownerName}</td>
@@ -3763,7 +3773,9 @@ export const AdminDashboard: React.FC = () => {
               <div className="flex items-start justify-between gap-2 mb-2">
                 <div>
                   <h3 className="text-base font-bold text-slate-900">
-                    Record Payment • Flat {targetFlat?.flatNumber || targetReading?.flatNumber}
+                    Record Payment • {((targetFlat?.flatNumber || targetReading?.flatNumber) || '').toLowerCase().includes('shop') || ((targetFlat?.flatNumber || targetReading?.flatNumber) || '').toLowerCase().startsWith('flat')
+                      ? (targetFlat?.flatNumber || targetReading?.flatNumber)
+                      : `Flat ${targetFlat?.flatNumber || targetReading?.flatNumber}`}
                   </h3>
                   <p className="text-xs text-slate-500">
                     {targetFlat?.ownerName} ({activeCycle.month})

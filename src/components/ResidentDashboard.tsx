@@ -95,7 +95,7 @@ export const ResidentDashboard: React.FC = () => {
   const [pinChangeError, setPinChangeError] = useState('');
   const [pinChangeSuccess, setPinChangeSuccess] = useState('');
 
-  // Find flat details: match by flatNumber first if available to avoid id-number collisions (e.g. database ID 'flat-101' belongs to Shops-02, whereas flatNumber '101' is Flat 101)
+  // Find flat details: match by flatNumber first if available to avoid id-number collisions
   const flat = useMemo(() => {
     // 1. If flatNumber is in session, find the flat strictly matching this human flat number
     if (currentSession?.flatNumber) {
@@ -110,14 +110,24 @@ export const ResidentDashboard: React.FC = () => {
       const foundById = flats.find((f) => f.id === currentSession.flatId);
       if (foundById) return foundById;
     }
-    return flats[0];
+    // Default to Flat 101 as primary unit
+    return flats.find((f) => normalizeFlatNumber(f.flatNumber) === 'flat-101' || f.flatNumber.trim() === '101') || flats[0];
   }, [flats, currentSession?.flatId, currentSession?.flatNumber]);
 
   // Resilient activeReading calculation: strictly uses authoritative recorded cycle amounts so it matches Admin exactly
   const activeReading = useMemo(() => {
     if (!currentViewCycle || !flat) return undefined;
-    // 1. Primary lookup by exact relational flatId
+    // 1. Primary lookup by exact relational flatId, BUT verify flatNumber isn't a shop-vs-flat collision
     let found = currentViewCycle.readings.find((r) => r.flatId === flat.id);
+    if (found && flat.flatNumber && found.flatNumber) {
+      const normReading = normalizeFlatNumber(found.flatNumber);
+      const normFlat = normalizeFlatNumber(flat.flatNumber);
+      if (normReading !== normFlat) {
+        found = currentViewCycle.readings.find(
+          (r) => normalizeFlatNumber(r.flatNumber) === normFlat
+        );
+      }
+    }
     // 2. Fallback lookup strictly by human flatNumber (NEVER match r.flatId by flat number)
     if (!found && flat.flatNumber) {
       const flatNorm = normalizeFlatNumber(flat.flatNumber);
@@ -126,6 +136,16 @@ export const ResidentDashboard: React.FC = () => {
           r.flatNumber === flat.flatNumber ||
           (Boolean(r.flatNumber) && normalizeFlatNumber(r.flatNumber) === flatNorm)
       );
+    }
+    // 3. Absolute safety check: ensure found reading's flatNumber actually matches flat's flatNumber
+    if (found && flat.flatNumber && found.flatNumber) {
+      const normReading = normalizeFlatNumber(found.flatNumber);
+      const normFlat = normalizeFlatNumber(flat.flatNumber);
+      if (normReading !== normFlat) {
+        found = currentViewCycle.readings.find(
+          (r) => normalizeFlatNumber(r.flatNumber) === normFlat
+        );
+      }
     }
     const isShop = (flat.flatNumber || '').toLowerCase().includes('shop') || (flat.id || '').toLowerCase().includes('shop');
 
@@ -176,8 +196,18 @@ export const ResidentDashboard: React.FC = () => {
     // Resilient fallback reading if cycle is missing an entry
     const prev = flat.baselineReading || 0;
     const rate = flat.customRatePerUnit || currentViewCycle.effectiveRatePerUnit || settings.defaultRatePerUnit || 9;
-    const commonChg = isShop ? 0 : (currentViewCycle.readings[0]?.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160);
-    const maintChg = isShop ? 0 : (currentViewCycle.readings[0]?.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110);
+    const refReading = currentViewCycle.readings.find((r) => {
+      const readingShop = (r.flatNumber || '').toLowerCase().includes('shop') || (r.flatId || '').toLowerCase().includes('shop');
+      return !readingShop && ((r.commonMeterCharges ?? 0) > 0 || (r.maintenanceCharges ?? 0) > 0);
+    }) || currentViewCycle.readings.find((r) => {
+      const readingShop = (r.flatNumber || '').toLowerCase().includes('shop') || (r.flatId || '').toLowerCase().includes('shop');
+      return !readingShop;
+    });
+
+    const commonChg = isShop ? 0 : (refReading?.commonMeterCharges ?? settings.defaultCommonMeterCharges ?? 160);
+    const maintChg = isShop ? 0 : (refReading?.maintenanceCharges ?? settings.defaultMaintenanceCharges ?? 110);
+    const commonLabel = refReading?.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light';
+    const maintLabel = refReading?.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning';
     const total = commonChg + maintChg;
     return {
       flatId: flat.id,
@@ -189,9 +219,9 @@ export const ResidentDashboard: React.FC = () => {
       calculatedAmount: 0,
       commonShareAmount: commonChg,
       commonMeterCharges: commonChg,
-      commonMeterLabel: currentViewCycle.readings[0]?.commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light',
+      commonMeterLabel: commonLabel,
       maintenanceCharges: maintChg,
-      maintenanceLabel: currentViewCycle.readings[0]?.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning',
+      maintenanceLabel: maintLabel,
       totalBillAmount: total,
       netPayableAmount: total,
       remainingBalance: total,
@@ -308,7 +338,7 @@ export const ResidentDashboard: React.FC = () => {
         </div>
         <h3 className="text-base font-bold text-slate-800">Billing Records Loading</h3>
         <p className="text-xs text-slate-500">
-          Preparing electricity bill records for {flat?.flatNumber ? `Flat ${flat.flatNumber}` : 'your unit'}...
+          Preparing electricity bill records for {flat?.flatNumber ? ((flat.flatNumber.toLowerCase().includes('shop') || flat.flatNumber.toLowerCase().startsWith('flat')) ? flat.flatNumber : `Flat ${flat.flatNumber}`) : 'your unit'}...
         </p>
       </div>
     );

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useBuilding } from '../context/BuildingContext';
+import { useBuilding, normalizeFlatNumber } from '../context/BuildingContext';
 import { FlatReadingEntry, BillingCycle } from '../types';
 import { generateWhatsAppBillMessage } from '../utils/billingCalculator';
 import {
@@ -38,7 +38,11 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
 
   if (!isOpen) return null;
 
-  const flat = flats.find((f) => f.id === reading.flatId || f.flatNumber === reading.flatNumber);
+  const flat = flats.find(
+    (f) =>
+      (reading.flatNumber && normalizeFlatNumber(f.flatNumber) === normalizeFlatNumber(reading.flatNumber)) ||
+      f.id === reading.flatId
+  );
   const isAdmin = currentSession?.role === 'admin';
 
   // Strict rate & bill alignment: use recorded official amounts if available, fallback with exact same formulas
