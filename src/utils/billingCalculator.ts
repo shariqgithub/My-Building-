@@ -117,14 +117,20 @@ export function computeMonthlyBills(params: ComputeBillParams): {
     const totalBill = energyAmount + (data.maintenanceCharges || 0) + (data.commonMeterCharges || 0) + customSum;
     const pendingAmt = data.pendingAmount || 0;
     const advanceAmt = data.advanceAmount || 0;
+    const totalDue = totalBill + pendingAmt;
     const netAdjustment = pendingAmt - advanceAmt;
-    const netPayable = Math.max(0, totalBill + netAdjustment);
+    const netPayable = Math.max(0, totalDue - advanceAmt);
+    const isCoveredByAdvance = advanceAmt > 0 && advanceAmt >= totalDue;
+    const surplusAdvance = Math.max(0, advanceAmt - totalDue);
+
     const paid = data.paidAmount;
-    const remaining = paid !== undefined ? netPayable - paid : undefined;
-    const advance = remaining !== undefined && remaining < 0 ? Math.abs(remaining) : 0;
+    let remaining = isCoveredByAdvance ? 0 : (paid !== undefined ? Math.max(0, netPayable - paid) : netPayable);
+    let totalAdvance = surplusAdvance + (paid !== undefined && paid > netPayable ? (paid - netPayable) : (isCoveredByAdvance && paid ? paid : 0));
 
     let status: 'paid' | 'unpaid' | 'pending' | 'partially_paid' = 'unpaid';
-    if (paid !== undefined && paid > 0) {
+    if (isCoveredByAdvance) {
+      status = 'paid';
+    } else if (paid !== undefined && paid > 0) {
       status = paid >= netPayable ? 'paid' : 'partially_paid';
     }
 
@@ -151,8 +157,10 @@ export function computeMonthlyBills(params: ComputeBillParams): {
       netPayableAmount: netPayable,
       paidAmount: paid,
       remainingBalance: remaining,
-      advancePaid: advance,
+      advancePaid: totalAdvance,
       paymentStatus: status,
+      paidDate: isCoveredByAdvance ? new Date().toISOString().split('T')[0] : undefined,
+      paymentMethod: isCoveredByAdvance ? 'Advance Credit' : undefined,
     };
   };
 
@@ -339,19 +347,27 @@ export function generateWhatsAppBillMessage(params: {
   const adjustmentLines: string[] = [];
   const effectivePending = pendingAmount !== undefined ? pendingAmount : (previousBalance > 0 ? previousBalance : 0);
   const effectiveAdvance = advanceAmount !== undefined ? advanceAmount : (previousBalance < 0 ? Math.abs(previousBalance) : 0);
+  const totalDueBeforeAdvance = totalBillAmount + effectivePending;
+  const isCoveredByAdvance = effectiveAdvance > 0 && effectiveAdvance >= totalDueBeforeAdvance;
+  const surplusAdvance = Math.max(0, effectiveAdvance - totalDueBeforeAdvance);
 
   if (effectivePending > 0) {
     adjustmentLines.push(`Pending Amount (Previous Month) - *+${effectivePending}/-*`);
   }
   if (effectiveAdvance > 0) {
-    adjustmentLines.push(`Advance Amount (Deduction) - *-₹${effectiveAdvance}/-*`);
+    const appliedAdvance = Math.min(effectiveAdvance, totalDueBeforeAdvance);
+    adjustmentLines.push(`Advance Credit (Deduction) - *-₹${appliedAdvance}/-*`);
+    if (surplusAdvance > 0) {
+      adjustmentLines.push(`Remaining Advance Balance - *₹${surplusAdvance}/-* (Available for next month)`);
+    }
   }
   const adjustmentBlock = adjustmentLines.length > 0 ? `\n${adjustmentLines.join('\n')}` : '';
 
-  const netPayable = netPayableAmount ?? Math.max(0, totalBillAmount + effectivePending - effectiveAdvance);
+  const netPayable = netPayableAmount ?? Math.max(0, totalDueBeforeAdvance - effectiveAdvance);
   const hasAdjustment = effectivePending > 0 || effectiveAdvance > 0 || previousBalance !== 0;
+  const statusLine = isCoveredByAdvance ? `\n*Status - *PAID (Settled via Advance Credit)*` : '';
   const finalTotalLine = hasAdjustment
-    ? `*Current Month Bill - *₹${totalBillAmount}/-*\n*Net Payable Amount - *₹${netPayable}/-*`
+    ? `*Current Month Bill - *₹${totalBillAmount}/-*\n*Net Payable Amount - *₹${netPayable}/-*${statusLine}`
     : `*Total amount - *₹${totalBillAmount}/-*`;
 
   const dueDateLine = dueDate ? `\nPayment Due Date - *${dueDate}*` : '';

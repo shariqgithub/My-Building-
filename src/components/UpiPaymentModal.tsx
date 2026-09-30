@@ -176,7 +176,12 @@ export const UpiPaymentModal: React.FC<UpiPaymentModalProps> = ({
               )}
               {hasAdvanceAmount && (
                 <div className="mt-1 inline-block px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  Includes -₹{(reading.advanceAmount ?? 0).toLocaleString('en-IN')} advance credit deduction
+                  Includes -₹{Math.min(reading.advanceAmount ?? 0, (reading.totalBillAmount ?? 0) + (reading.pendingAmount ?? 0)).toLocaleString('en-IN')} advance credit deduction
+                  {(reading.advancePaid !== undefined && reading.advancePaid > 0) && (
+                    <span className="font-bold ml-1 text-emerald-800">
+                      (₹{reading.advancePaid.toLocaleString('en-IN')} remaining advance)
+                    </span>
+                  )}
                 </div>
               )}
               {hasPreviousDues && (

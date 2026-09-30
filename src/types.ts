@@ -50,7 +50,7 @@ export interface FlatReadingEntry {
   remainingBalance?: number; // netPayableAmount - (paidAmount || 0) (if > 0, remaining due; if < 0, advance paid)
   advancePaid?: number; // Advance amount paid (when paidAmount > netPayableAmount)
   paidDate?: string;
-  paymentMethod?: 'UPI' | 'Cash' | 'Bank Transfer';
+  paymentMethod?: 'UPI' | 'Cash' | 'Bank Transfer' | 'Cheque' | 'Advance Credit';
   upiReference?: string;
   adminNotes?: string;
 }

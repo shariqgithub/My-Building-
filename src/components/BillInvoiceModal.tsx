@@ -69,7 +69,12 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
   const effectiveTotalBill = reading.totalBillAmount ?? (effectiveEnergyAmount + commonChg + maintChg + customSum);
   const pendingAmt = reading.pendingAmount ?? (reading.previousBalance && reading.previousBalance > 0 ? reading.previousBalance : 0);
   const advanceAmt = reading.advanceAmount ?? (reading.previousBalance && reading.previousBalance < 0 ? Math.abs(reading.previousBalance) : 0);
-  const effectiveNetPayable = reading.netPayableAmount ?? Math.max(0, effectiveTotalBill + pendingAmt - advanceAmt);
+  const totalDue = effectiveTotalBill + pendingAmt;
+  const effectiveNetPayable = reading.netPayableAmount ?? Math.max(0, totalDue - advanceAmt);
+  const isCoveredByAdvance = advanceAmt > 0 && advanceAmt >= totalDue;
+  const surplusAdvance = Math.max(0, advanceAmt - totalDue);
+  const effectiveAdvancePaid = reading.advancePaid !== undefined && reading.advancePaid > 0 ? reading.advancePaid : surplusAdvance;
+  const isPaid = reading.paymentStatus === 'paid' || isCoveredByAdvance;
 
   // Generate clean, self-contained HTML for printing and downloading
   const generatePrintableHtml = () => {
@@ -173,11 +178,16 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
       return `<div class="charge-row"><span>${col.name}:</span><span style="font-weight: 600;">₹${Number(val).toLocaleString('en-IN')}/-</span></div>`;
     }).join('') || ''}
     ${pendingAmt > 0 ? `<div class="charge-row" style="color: #e11d48; font-weight: 600;"><span>Pending / Unpaid Carry-Forward:</span><span>+₹${pendingAmt.toLocaleString('en-IN')}/-</span></div>` : ''}
-    ${advanceAmt > 0 ? `<div class="charge-row" style="color: #059669; font-weight: 600;"><span>Advance Paid Credit Deducted:</span><span>-₹${advanceAmt.toLocaleString('en-IN')}/-</span></div>` : ''}
+    ${advanceAmt > 0 ? `<div class="charge-row" style="color: #059669; font-weight: 600;"><span>Advance Credit Deducted:</span><span>-₹${Math.min(advanceAmt, totalDue).toLocaleString('en-IN')}/-</span></div>` : ''}
     <div class="total-row">
       <span>Net Payable Amount:</span>
       <span>₹${effectiveNetPayable.toLocaleString('en-IN')}/-</span>
     </div>
+    ${effectiveAdvancePaid > 0 ? `
+    <div class="charge-row" style="margin-top: 6px; color: #065f46; font-weight: 700; background: #ecfdf5; padding: 4px 8px; border-radius: 4px; border: 1px solid #a7f3d0;">
+      <span>Remaining Advance Balance (Carried Forward):</span>
+      <span>₹${effectiveAdvancePaid.toLocaleString('en-IN')}/-</span>
+    </div>` : ''}
     ${reading.paidAmount !== undefined && reading.paidAmount > 0 ? `
     <div class="charge-row" style="margin-top: 6px; color: #065f46; font-weight: 700;">
       <span>Amount Paid:</span>
@@ -185,9 +195,9 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
     </div>` : ''}
   </div>
 
-  ${reading.paymentStatus === 'paid' ? `
+  ${isPaid ? `
   <div class="status-paid">
-    ✔ PAYMENT RECEIVED IN FULL ${reading.paidDate ? `• ${reading.paidDate}` : ''} ${reading.upiReference ? `(Ref: ${reading.upiReference})` : ''}
+    ✔ PAYMENT RECEIVED IN FULL ${isCoveredByAdvance && (!reading.paidAmount || reading.paidAmount === 0) ? '(Settled via Advance Credit)' : (reading.paidDate ? `• ${reading.paidDate}` : '')} ${reading.upiReference ? `(Ref: ${reading.upiReference})` : ''}
   </div>` : ''}
 
   <div class="footer">
@@ -531,14 +541,14 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
             )}
 
             {/* Advance Amount Deduction */}
-            {reading.advanceAmount !== undefined && reading.advanceAmount > 0 && (
+            {advanceAmt > 0 && (
               <div className="flex justify-between items-center py-1.5 px-2.5 rounded-lg bg-emerald-50 border border-emerald-200">
                 <span className="font-semibold text-emerald-800 flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                  Advance Amount (Credit Deduction):
+                  Advance Credit Deducted:
                 </span>
                 <span className="font-bold font-mono text-emerald-700">
-                  -₹{reading.advanceAmount.toLocaleString('en-IN')}/-
+                  -₹{Math.min(advanceAmt, totalDue).toLocaleString('en-IN')}/-
                 </span>
               </div>
             )}
@@ -562,12 +572,32 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
               </div>
             )}
 
-            <div className="border-t-2 border-amber-300 pt-1.5 flex justify-between font-extrabold text-sm text-slate-900">
+            <div className="border-t-2 border-amber-300 pt-1.5 flex justify-between items-baseline font-extrabold text-sm text-slate-900">
               <span>Net Payable Amount:</span>
-              <span className="text-amber-900 text-base">
-                ₹{effectiveNetPayable.toLocaleString('en-IN')}/-
-              </span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-amber-900 text-base">
+                  ₹{effectiveNetPayable.toLocaleString('en-IN')}/-
+                </span>
+                {effectiveNetPayable === 0 && advanceAmt > 0 && (
+                  <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                    Paid via Advance
+                  </span>
+                )}
+              </div>
             </div>
+
+            {/* Remaining Advance Balance available for future cycles */}
+            {effectiveAdvancePaid > 0 && (
+              <div className="mt-1 flex justify-between items-center py-1.5 px-2.5 rounded-lg bg-emerald-100/70 border border-emerald-300 text-xs">
+                <span className="font-bold text-emerald-950 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                  Remaining Advance Balance (Next Month):
+                </span>
+                <span className="font-extrabold font-mono text-emerald-900 text-sm">
+                  ₹{effectiveAdvancePaid.toLocaleString('en-IN')}/-
+                </span>
+              </div>
+            )}
 
             {reading.paidAmount !== undefined && reading.paidAmount > 0 && (
               <div className="pt-1.5 border-t border-dashed border-amber-300 space-y-1">
@@ -581,30 +611,39 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
                     <span className="font-mono">₹{reading.remainingBalance.toLocaleString('en-IN')}/-</span>
                   </div>
                 )}
-                {reading.advancePaid !== undefined && reading.advancePaid > 0 && (
-                  <div className="flex justify-between text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded">
-                    <span>Advance Credit (Will deduct from next month):</span>
-                    <span className="font-mono">₹{reading.advancePaid.toLocaleString('en-IN')}/-</span>
-                  </div>
-                )}
               </div>
             )}
           </div>
 
           {/* Payment Status Info (Shown when payment is confirmed) */}
-          {reading.paymentStatus === 'paid' && (
+          {isPaid && (
             <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs space-y-0.5 text-emerald-900">
               <div className="font-bold flex items-center gap-1.5 text-emerald-800">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                Payment Received in Full
+                {isCoveredByAdvance && (!reading.paidAmount || reading.paidAmount === 0)
+                  ? 'Payment Settled in Full via Advance Credit'
+                  : 'Payment Received in Full'}
               </div>
-              <p className="text-[11px]">
-                Paid Date: <span className="font-semibold">{reading.paidDate || cycle.generatedDate}</span> | Mode: <span className="font-semibold">{reading.paymentMethod || 'UPI'}</span>
-              </p>
-              {reading.upiReference && (
-                <p className="text-[11px] font-mono">
-                  Ref/UTR: <span className="font-bold">{reading.upiReference}</span>
-                </p>
+              {isCoveredByAdvance && (!reading.paidAmount || reading.paidAmount === 0) ? (
+                <div className="text-[11px] text-emerald-700">
+                  Bill of ₹{effectiveTotalBill.toLocaleString('en-IN')} was deducted from ₹{advanceAmt.toLocaleString('en-IN')} advance credit.
+                  {effectiveAdvancePaid > 0 && (
+                    <span className="ml-1 font-semibold">
+                      Remaining ₹{effectiveAdvancePaid.toLocaleString('en-IN')} advance balance is available for upcoming bills.
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <p className="text-[11px]">
+                    Paid Date: <span className="font-semibold">{reading.paidDate || cycle.generatedDate}</span> | Mode: <span className="font-semibold">{reading.paymentMethod || 'UPI'}</span>
+                  </p>
+                  {reading.upiReference && (
+                    <p className="text-[11px] font-mono">
+                      Ref/UTR: <span className="font-bold">{reading.upiReference}</span>
+                    </p>
+                  )}
+                </>
               )}
             </div>
           )}

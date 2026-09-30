@@ -106,7 +106,7 @@ interface BuildingContextType {
     flatId: string,
     status: 'paid' | 'unpaid' | 'pending' | 'partially_paid',
     details?: {
-      method?: 'UPI' | 'Cash' | 'Bank Transfer';
+      method?: 'UPI' | 'Cash' | 'Bank Transfer' | 'Cheque' | 'Advance Credit';
       upiRef?: string;
       paidAmount?: number;
       adminNotes?: string;
@@ -197,43 +197,77 @@ export function syncCycleBalances(allCycles: BillingCycle[]): BillingCycle[] {
       const carriedBalance = cycleIndex === 0 ? (r.previousBalance ?? 0) : (flatCumulativeBalance.get(r.flatId) ?? 0);
 
       // Handle explicit pendingAmount & advanceAmount if provided, or default from carried balance
-      const pendingAmt = r.pendingAmount !== undefined
-        ? r.pendingAmount
-        : (carriedBalance > 0 ? carriedBalance : 0);
-      const advanceAmt = r.advanceAmount !== undefined
-        ? r.advanceAmount
-        : (carriedBalance < 0 ? Math.abs(carriedBalance) : (r.advancePaid || 0));
+      let pendingAmt = 0;
+      let advanceAmt = 0;
+
+      if (cycleIndex === 0) {
+        pendingAmt = (r.pendingAmount !== undefined && r.pendingAmount > 0)
+          ? r.pendingAmount
+          : (carriedBalance > 0 ? carriedBalance : 0);
+        advanceAmt = (r.advanceAmount !== undefined && r.advanceAmount > 0)
+          ? r.advanceAmount
+          : (carriedBalance < 0 ? Math.abs(carriedBalance) : (r.advancePaid || 0));
+      } else {
+        // In subsequent cycles, carried cumulative balance automatically sets pending or advance
+        if (carriedBalance > 0) {
+          pendingAmt = carriedBalance;
+          advanceAmt = 0;
+        } else if (carriedBalance < 0) {
+          advanceAmt = Math.abs(carriedBalance);
+          pendingAmt = 0;
+        } else {
+          pendingAmt = 0;
+          advanceAmt = 0;
+        }
+      }
 
       const netAdjustment = pendingAmt - advanceAmt;
 
-      // 3. Net payable amount = currentMonthBill + pendingAmt - advanceAmt
-      const netPayable = Math.max(0, currentMonthBill + netAdjustment);
+      // Gross total due before applying advance credit
+      const totalDueBeforeAdvance = currentMonthBill + pendingAmt;
 
-      // 4. Determine paidAmount & remainingBalance
+      // 3. Net payable amount after deducting advance credit (minimum 0)
+      const netPayable = Math.max(0, totalDueBeforeAdvance - advanceAmt);
+
+      // If advance credit is greater than or equal to total amount due, bill is completely paid by advance!
+      const isFullyCoveredByAdvance = advanceAmt > 0 && advanceAmt >= totalDueBeforeAdvance;
+      // Surplus advance remaining after settling this month's bill (e.g. 400 advance - 290 bill = 110 surplus)
+      const surplusAdvanceCredit = Math.max(0, advanceAmt - totalDueBeforeAdvance);
+
+      // 4. Determine paidAmount, remainingBalance, advancePaid & paymentStatus
       let paidAmt = r.paidAmount;
       let status = r.paymentStatus;
 
-      // If status was already marked 'paid' without explicit paidAmount, default paidAmt to netPayable
-      if (status === 'paid' && (paidAmt === undefined || paidAmt === null)) {
+      // If status was explicitly marked 'paid' without explicit paidAmount, default to netPayable
+      if (status === 'paid' && (paidAmt === undefined || paidAmt === null) && netPayable > 0) {
         paidAmt = netPayable;
       }
 
       let remaining = netPayable;
-      let advance = 0;
+      let totalAdvanceRemaining = surplusAdvanceCredit;
 
-      if (paidAmt !== undefined && paidAmt !== null) {
+      if (isFullyCoveredByAdvance) {
+        // Automatically mark as paid since advance credit pays the full bill
+        status = 'paid';
+        remaining = 0;
+        if (paidAmt !== undefined && paidAmt !== null && paidAmt > 0) {
+          totalAdvanceRemaining += paidAmt;
+        }
+      } else if (paidAmt !== undefined && paidAmt !== null) {
         remaining = netPayable - paidAmt;
         if (remaining < 0) {
-          advance = Math.abs(remaining);
+          totalAdvanceRemaining += Math.abs(remaining);
+          remaining = 0;
           status = 'paid';
         } else if (remaining === 0) {
-          advance = 0;
           status = 'paid';
         } else if (paidAmt > 0) {
           status = 'partially_paid';
         } else {
           status = 'unpaid';
         }
+      } else if (status === 'paid' && netPayable === 0) {
+        remaining = 0;
       } else if (status === 'pending') {
         remaining = netPayable;
       } else {
@@ -241,12 +275,17 @@ export function syncCycleBalances(allCycles: BillingCycle[]): BillingCycle[] {
         remaining = netPayable;
       }
 
-      // Update the cumulative balance for this flat to carry over to the next cycle
-      flatCumulativeBalance.set(r.flatId, remaining < 0 ? -advance : remaining);
+      // Update the cumulative balance for this flat to carry over to the next cycle:
+      // Negative = resident has surplus advance credit available (e.g. -110)
+      // Positive = resident owes money (e.g. +250)
+      const balanceToCarry = remaining > 0 ? remaining : (totalAdvanceRemaining > 0 ? -totalAdvanceRemaining : 0);
+      flatCumulativeBalance.set(r.flatId, balanceToCarry);
 
-      totalBilled += netPayable;
+      totalBilled += (currentMonthBill + pendingAmt);
       if (paidAmt && paidAmt > 0) {
-        totalCollected += paidAmt;
+        totalCollected += Math.min(paidAmt, totalDueBeforeAdvance);
+      } else if (isFullyCoveredByAdvance) {
+        totalCollected += totalDueBeforeAdvance;
       }
 
       return {
@@ -260,8 +299,14 @@ export function syncCycleBalances(allCycles: BillingCycle[]): BillingCycle[] {
         netPayableAmount: netPayable,
         paidAmount: paidAmt,
         remainingBalance: remaining,
-        advancePaid: advance,
+        advancePaid: totalAdvanceRemaining,
         paymentStatus: status,
+        paidDate: isFullyCoveredByAdvance && !r.paidDate
+          ? (cycle.generatedDate || new Date().toISOString().split('T')[0])
+          : r.paidDate,
+        paymentMethod: isFullyCoveredByAdvance && !r.paymentMethod
+          ? 'Advance Credit'
+          : r.paymentMethod,
       };
     });
 
@@ -556,16 +601,23 @@ export const deduplicateFlatsAndCycles = (
           const total = energy + common + maint + customSum;
           const pending = r.pendingAmount ?? 0;
           const advance = r.advanceAmount ?? 0;
-          const net = Math.max(0, total + pending - advance);
-          const remaining = r.paidAmount !== undefined ? net - r.paidAmount : net;
+          const totalDue = total + pending;
+          const net = Math.max(0, totalDue - advance);
+          const isCovered = advance > 0 && advance >= totalDue;
+          const surplusAdvance = Math.max(0, advance - totalDue);
+          const paid = r.paidAmount;
+          const remaining = isCovered ? 0 : (paid !== undefined ? Math.max(0, net - paid) : net);
+          const totalAdvancePaid = surplusAdvance + (paid !== undefined && paid > net ? (paid - net) : (isCovered && paid ? paid : 0));
+          const status = isCovered ? 'paid' : (paid && paid >= net && net > 0 ? 'paid' : r.paymentStatus);
           return {
             ...r,
             ratePerUnit: rate,
             calculatedAmount: energy,
             totalBillAmount: total,
             netPayableAmount: net,
-            remainingBalance: remaining > 0 ? remaining : 0,
-            advancePaid: remaining < 0 ? Math.abs(remaining) : 0,
+            remainingBalance: remaining,
+            advancePaid: totalAdvancePaid,
+            paymentStatus: status,
           };
         }
         return r;
@@ -1934,7 +1986,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     flatId: string,
     status: 'paid' | 'unpaid' | 'pending' | 'partially_paid',
     details?: {
-      method?: 'UPI' | 'Cash' | 'Bank Transfer';
+      method?: 'UPI' | 'Cash' | 'Bank Transfer' | 'Cheque' | 'Advance Credit';
       upiRef?: string;
       paidAmount?: number;
       adminNotes?: string;

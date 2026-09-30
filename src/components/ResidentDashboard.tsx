@@ -173,9 +173,18 @@ export const ResidentDashboard: React.FC = () => {
       const total = found.totalBillAmount !== undefined ? found.totalBillAmount : (energy + common + maint + customSum);
       const pending = found.pendingAmount ?? (found.previousBalance && found.previousBalance > 0 ? found.previousBalance : 0);
       const advance = found.advanceAmount ?? (found.previousBalance && found.previousBalance < 0 ? Math.abs(found.previousBalance) : 0);
-      const net = found.netPayableAmount !== undefined ? found.netPayableAmount : Math.max(0, total + pending - advance);
-      const remaining = found.remainingBalance !== undefined ? found.remainingBalance : (found.paidAmount !== undefined ? net - found.paidAmount : net);
-      const advancePaid = found.advancePaid !== undefined ? found.advancePaid : (remaining < 0 ? Math.abs(remaining) : 0);
+      const totalDue = total + pending;
+      const net = found.netPayableAmount !== undefined ? found.netPayableAmount : Math.max(0, totalDue - advance);
+      const isCovered = advance > 0 && advance >= totalDue;
+      const surplusAdvance = Math.max(0, advance - totalDue);
+
+      const paid = found.paidAmount;
+      const remaining = isCovered ? 0 : (found.remainingBalance !== undefined ? found.remainingBalance : (paid !== undefined ? Math.max(0, net - paid) : net));
+      let advancePaid = found.advancePaid !== undefined && found.advancePaid > 0 ? found.advancePaid : surplusAdvance;
+      if (paid && paid > net) {
+        advancePaid = Math.max(advancePaid, surplusAdvance + (paid - net));
+      }
+      const status = isCovered ? 'paid' : (paid && paid >= net && net > 0 ? 'paid' : found.paymentStatus);
 
       return {
         ...found,
@@ -190,6 +199,7 @@ export const ResidentDashboard: React.FC = () => {
         advanceAmount: advance,
         remainingBalance: remaining > 0 ? remaining : 0,
         advancePaid: advancePaid,
+        paymentStatus: status,
       };
     }
 
@@ -563,10 +573,15 @@ export const ResidentDashboard: React.FC = () => {
             <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 pb-4 border-b border-slate-100">
               <div>
                 <span className="text-xs text-slate-400 block mb-0.5">Total Net Payable</span>
-                <div className="flex items-baseline gap-2">
+                <div className="flex items-baseline gap-2 flex-wrap">
                   <span className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">
                     ₹{(activeReading.netPayableAmount ?? activeReading.totalBillAmount).toLocaleString('en-IN')}
                   </span>
+                  {activeReading.netPayableAmount === 0 && (activeReading.advanceAmount ?? 0) > 0 && (
+                    <span className="text-xs font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                      Fully Settled via Advance
+                    </span>
+                  )}
                   <span className="text-xs text-slate-500 font-medium">
                     (@ ₹{activeReading.ratePerUnit.toFixed(2)}/unit)
                   </span>
@@ -577,9 +592,16 @@ export const ResidentDashboard: React.FC = () => {
                   </span>
                 )}
                 {((activeReading.advanceAmount ?? 0) > 0) && (
-                  <span className="text-xs text-emerald-600 font-semibold block mt-1">
-                    Includes -₹{(activeReading.advanceAmount ?? 0).toLocaleString('en-IN')} advance credit deduction
-                  </span>
+                  <div className="mt-1 space-y-0.5">
+                    <span className="text-xs text-emerald-700 font-semibold block">
+                      Includes -₹{Math.min(activeReading.advanceAmount ?? 0, (activeReading.totalBillAmount ?? 0) + (activeReading.pendingAmount ?? 0)).toLocaleString('en-IN')} advance credit deduction
+                    </span>
+                    {(activeReading.advancePaid !== undefined && activeReading.advancePaid > 0) && (
+                      <span className="text-xs text-emerald-800 font-bold block bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                        ✨ Remaining Advance Balance: ₹{activeReading.advancePaid.toLocaleString('en-IN')} (available for next month)
+                      </span>
+                    )}
+                  </div>
                 )}
                 {activeReading.pendingAmount === undefined && activeReading.advanceAmount === undefined && ((activeReading.previousBalance ?? 0) > 0) && (
                   <span className="text-xs text-rose-600 font-semibold block mt-1">
@@ -731,12 +753,19 @@ export const ResidentDashboard: React.FC = () => {
                       <span className="font-mono">₹{activeReading.remainingBalance.toLocaleString('en-IN')}/-</span>
                     </div>
                   )}
-                  {activeReading.advancePaid !== undefined && activeReading.advancePaid > 0 && (
-                    <div className="flex justify-between text-emerald-700 font-bold bg-emerald-50 px-2 py-1 rounded-md">
-                      <span>Advance Credit (Will deduct from next month):</span>
-                      <span className="font-mono">₹{activeReading.advancePaid.toLocaleString('en-IN')}/-</span>
-                    </div>
-                  )}
+                </div>
+              )}
+
+              {/* Advance Credit remaining to carry forward */}
+              {activeReading.advancePaid !== undefined && activeReading.advancePaid > 0 && (
+                <div className="mt-2 flex justify-between items-center text-emerald-900 font-bold bg-emerald-50 border border-emerald-300 px-3 py-1.5 rounded-lg text-xs">
+                  <span className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    Remaining Advance Balance (Available for next bills):
+                  </span>
+                  <span className="font-mono font-extrabold text-sm text-emerald-800">
+                    ₹{activeReading.advancePaid.toLocaleString('en-IN')}/-
+                  </span>
                 </div>
               )}
             </div>
@@ -779,13 +808,15 @@ export const ResidentDashboard: React.FC = () => {
             </div>
 
             {activeReading.paymentStatus === 'paid' && (
-              <div className="mt-3 p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center justify-between">
-                <span className="flex items-center gap-1.5 font-medium">
+              <div className="mt-3 p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5 font-bold">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  Paid on {activeReading.paidDate} via {activeReading.paymentMethod || 'UPI'}
+                  {((activeReading.advanceAmount ?? 0) >= ((activeReading.totalBillAmount ?? 0) + (activeReading.pendingAmount ?? 0)) && (!activeReading.paidAmount || activeReading.paidAmount === 0))
+                    ? `Paid in Full via Advance Credit Deduction${(activeReading.advancePaid ?? 0) > 0 ? ` • ₹${activeReading.advancePaid} remaining balance` : ''}`
+                    : `Paid on ${activeReading.paidDate || 'current cycle'} via ${activeReading.paymentMethod || 'UPI'}`}
                 </span>
                 {activeReading.upiReference && (
-                  <span className="font-mono text-[11px] bg-white px-2 py-0.5 rounded border border-emerald-200">
+                  <span className="font-mono text-[11px] bg-white px-2 py-0.5 rounded border border-emerald-200 shrink-0">
                     {activeReading.upiReference}
                   </span>
                 )}
