@@ -56,8 +56,8 @@ export const EditFlatModal: React.FC<EditFlatModalProps> = ({
       return;
     }
 
-    if (cleanPhone.length !== 10) {
-      setError('Phone number must be exactly 10 digits (e.g. 9820123456).');
+    if (cleanPhone && cleanPhone.length !== 10) {
+      setError('Phone number must be exactly 10 digits (e.g. 9820123456) or left blank to remove.');
       return;
     }
 
@@ -73,7 +73,7 @@ export const EditFlatModal: React.FC<EditFlatModalProps> = ({
     const updates: Partial<FlatInfo> = {
       flatNumber: cleanFlatNum,
       ownerName: cleanName,
-      phone: cleanPhone,
+      phone: cleanPhone || '',
       meterNumber: meterNumber.trim() || `SM-${cleanFlatNum}`,
       floor: cleanFloor,
       customRatePerUnit: customRate.trim() ? Number(customRate) : undefined,
@@ -197,10 +197,21 @@ export const EditFlatModal: React.FC<EditFlatModalProps> = ({
 
           {/* Mobile / Phone Number */}
           <div>
-            <label className="block font-bold text-slate-700 mb-1 flex items-center gap-1">
-              <Phone className="w-3.5 h-3.5 text-amber-600" />
-              Mobile Number (10 Digits) *
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="font-bold text-slate-700 flex items-center gap-1">
+                <Phone className="w-3.5 h-3.5 text-amber-600" />
+                Mobile Number (10 Digits)
+              </label>
+              {phone && (
+                <button
+                  type="button"
+                  onClick={() => setPhone('')}
+                  className="text-[11px] text-rose-600 hover:text-rose-800 font-semibold cursor-pointer underline"
+                >
+                  Remove Number
+                </button>
+              )}
+            </div>
             <div className="flex items-center gap-1.5">
               <span className="px-2.5 py-2 rounded-xl bg-slate-100 border border-slate-300 font-mono font-bold text-slate-600 text-xs select-none">
                 +91
@@ -209,13 +220,12 @@ export const EditFlatModal: React.FC<EditFlatModalProps> = ({
                 type="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                placeholder="9820123456"
+                placeholder="Leave blank or enter 10 digits"
                 maxLength={10}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 font-mono font-bold tracking-wide focus:bg-white focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
-                required
               />
             </div>
-            <p className="text-[10px] text-slate-400 mt-0.5">Used for WhatsApp bill delivery & Resident PIN sign-in</p>
+            <p className="text-[10px] text-slate-400 mt-0.5">Used for WhatsApp bill delivery & Resident PIN sign-in. Clear to remove number from flat.</p>
           </div>
 
           {/* Security PIN for Resident Login */}

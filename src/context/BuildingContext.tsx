@@ -443,7 +443,6 @@ export const deduplicateFlatsAndCycles = (
       let score = 0;
       if (f.id === canonicalId) score += 10;
       if (f.pin && f.pin.trim().length >= 4) score += 3;
-      if (f.phone && f.phone.includes('8077649394')) score += 3;
       if (f.ownerName && !f.ownerName.toLowerCase().includes('owner') && !f.ownerName.toLowerCase().includes('resident')) score += 3;
 
       for (const c of rawCycles) {
@@ -470,9 +469,6 @@ export const deduplicateFlatsAndCycles = (
       if (!mergedFlat.pin && other.pin) mergedFlat.pin = other.pin;
       if (!mergedFlat.customRatePerUnit && other.customRatePerUnit) {
         mergedFlat.customRatePerUnit = other.customRatePerUnit;
-      }
-      if ((!mergedFlat.phone || mergedFlat.phone.length < 10) && other.phone) {
-        mergedFlat.phone = other.phone;
       }
       if (
         (!mergedFlat.ownerName || mergedFlat.ownerName.toLowerCase().includes('resident') || mergedFlat.ownerName.toLowerCase().includes('owner')) &&
@@ -671,13 +667,10 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!Array.isArray(list) || list.length === 0) list = INITIAL_FLATS;
 
       list = list.map((f) => {
-        if ((normalizeFlatNumber(f.flatNumber) === 'flat-101' || f.flatNumber.trim() === '101') && (!f.phone || f.phone === '9820111101')) {
+        if ((f.id === 'flat-402' || normalizeFlatNumber(f.flatNumber) === 'flat-402') && f.phone === '9820111402') {
           return { ...f, phone: '8077649394', ownerName: 'Mohammad Shariq Ansari' };
         }
-        if ((f.id === 'flat-402' || normalizeFlatNumber(f.flatNumber) === 'flat-402') && (!f.phone || f.phone === '9820111402')) {
-          return { ...f, phone: '8077649394', ownerName: 'Mohammad Shariq Ansari' };
-        }
-        if (f.id === 'flat-203' && (!f.phone || f.phone === '9820111203')) {
+        if (f.id === 'flat-203' && f.phone === '9820111203') {
           return { ...f, phone: '9876554327' };
         }
         return f;
@@ -839,18 +832,6 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             parsed.phone = FIXED_ADMIN_PHONE;
             parsed.isCommitteeMember = true;
           } else if (
-            parsed.flatId === 'flat-101' ||
-            parsed.flatNumber === '101' ||
-            parsed.flatNumber === 'Flat 101' ||
-            parsed.flatId === 'flat-104' ||
-            (parsed.phone && parsed.phone.includes('8077649394') && (parsed.role === 'admin' || !parsed.flatNumber))
-          ) {
-            parsed.flatId = 'flat-101';
-            parsed.flatNumber = '101';
-            parsed.name = 'Mr. Shariq Ansari';
-            parsed.phone = FIXED_ADMIN_PHONE;
-            parsed.isCommitteeMember = true;
-          } else if (
             parsed.flatNumber === '01' ||
             parsed.flatId === 'flat-01'
           ) {
@@ -875,8 +856,8 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               ...parsed,
               name: FIXED_ADMIN_NAME,
               phone: FIXED_ADMIN_PHONE,
-              flatId: 'flat-101',
-              flatNumber: '101',
+              flatId: 'flat-402',
+              flatNumber: '402',
             };
           }
           return parsed;
@@ -972,9 +953,6 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
             if (cloudFlats.length > 0) {
               cloudFlats = cloudFlats.map((f: FlatInfo) => {
-                if ((normalizeFlatNumber(f.flatNumber) === 'flat-101' || f.flatNumber.trim() === '101') && (!f.phone || f.phone === '9820111101')) {
-                  return { ...f, phone: '8077649394', ownerName: 'Mohammad Shariq Ansari' };
-                }
                 return f;
               });
               for (const reqF of INITIAL_FLATS) {
@@ -1746,6 +1724,9 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const updateFlat = (flatId: string, updates: Partial<FlatInfo>) => {
     const updatedFlats = flats.map((f) => (f.id === flatId ? { ...f, ...updates } : f));
     setFlats(updatedFlats);
+    try {
+      localStorage.setItem(STORAGE_KEYS.FLATS, JSON.stringify(updatedFlats));
+    } catch {}
 
     let updatedCycles = cycles;
     // If flatNumber is updated, sync it across all billing cycles
@@ -1758,6 +1739,9 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ),
       }));
       setCycles(updatedCycles);
+      try {
+        localStorage.setItem(STORAGE_KEYS.CYCLES, JSON.stringify(updatedCycles));
+      } catch {}
     }
 
     // Persist directly to Firestore
@@ -1768,9 +1752,9 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (prev && prev.flatId === flatId) {
         return {
           ...prev,
-          name: updates.ownerName || prev.name,
-          phone: updates.phone || prev.phone,
-          flatNumber: updates.flatNumber || prev.flatNumber,
+          name: updates.ownerName !== undefined ? updates.ownerName : prev.name,
+          phone: updates.phone !== undefined ? updates.phone : prev.phone,
+          flatNumber: updates.flatNumber !== undefined ? updates.flatNumber : prev.flatNumber,
         };
       }
       return prev;
@@ -2242,11 +2226,10 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return await saveToCloud(undefined, updatedFlats);
   };
 
-  // Helper to reliably get admin's primary flat (Flat 101) regardless of Firestore ID naming
+  // Helper to reliably get admin's primary flat based on admin registered phone number
   const getAdminPrimaryFlat = (): FlatInfo => {
-    const f101 = flats.find((f) => normalizeFlatNumber(f.flatNumber) === 'flat-101' || f.flatNumber.trim() === '101' || f.id === 'flat-101');
-    if (f101) return f101;
-    const byPhone = flats.find((f) => isPhoneMatch(f.phone, FIXED_ADMIN_PHONE));
+    const adminCleanPhone = (settings.adminPhone || FIXED_ADMIN_PHONE || '8077649394').replace(/\D/g, '');
+    const byPhone = flats.find((f) => isPhoneMatch(f.phone, adminCleanPhone));
     if (byPhone) return byPhone;
     if (settings.adminFlatId) {
       const bySettings = flats.find((f) => f.id === settings.adminFlatId && !f.flatNumber.toLowerCase().includes('shop'));
@@ -2662,7 +2645,6 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     if (!targetFlat) {
       targetFlat =
-        flats.find((f) => normalizeFlatNumber(f.flatNumber) === 'flat-101') ||
         adminFlats[0] ||
         flats.find((f) => isPhoneMatch(f.phone, adminClean)) ||
         getAdminPrimaryFlat();
@@ -2670,9 +2652,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const isTargetAdminFlat =
       isPhoneMatch(targetFlat.phone, adminClean) ||
-      targetFlat.id === settings.adminFlatId ||
-      normalizeFlatNumber(targetFlat.flatNumber) === 'flat-101' ||
-      normalizeFlatNumber(targetFlat.flatNumber) === 'flat-402';
+      targetFlat.id === settings.adminFlatId;
 
     setAndUnlockSession({
       role: 'resident',
@@ -2708,116 +2688,97 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  // Admin's own registered flats: strictly Flat 101 and Flat 402 for Secretary Mohammad Shariq Ansari (8077649394)
+  // Admin's own registered flats: strictly flats whose phone number matches the admin/secretary's registered phone!
   const adminFlats = useMemo(() => {
+    const adminCleanPhone = (settings.adminPhone || FIXED_ADMIN_PHONE || '8077649394').replace(/\D/g, '');
+    const adminTen = adminCleanPhone.length > 10 ? adminCleanPhone.slice(-10) : adminCleanPhone;
+
     const matches = flats.filter((f) => {
-      const norm = normalizeFlatNumber(f.flatNumber);
-      // Strictly exclude any shops or non-admin flats
-      if (norm.includes('shop') || f.flatNumber.toLowerCase().includes('shop') || f.id.toLowerCase().includes('shop')) {
-        return false;
-      }
-      return (
-        norm === 'flat-101' ||
-        norm === 'flat-402' ||
-        f.flatNumber.trim() === '101' ||
-        f.flatNumber.trim() === '402'
-      );
+      // Must match admin's registered phone number
+      return isPhoneMatch(f.phone, adminTen);
     });
 
     const seenNumbers = new Set<string>();
-    const result = matches.filter((f) => {
+    return matches.filter((f) => {
       const key = normalizeFlatNumber(f.flatNumber);
       if (seenNumbers.has(key)) return false;
       seenNumbers.add(key);
       return true;
     });
-
-    // Ensure both Flat 101 and Flat 402 are present if available in flats
-    if (!result.some((f) => normalizeFlatNumber(f.flatNumber) === 'flat-101')) {
-      const f101 = flats.find((f) => normalizeFlatNumber(f.flatNumber) === 'flat-101' || f.flatNumber.trim() === '101');
-      if (f101) result.unshift(f101);
-    }
-    if (!result.some((f) => normalizeFlatNumber(f.flatNumber) === 'flat-402')) {
-      const f402 = flats.find((f) => normalizeFlatNumber(f.flatNumber) === 'flat-402' || f.flatNumber.trim() === '402');
-      if (f402) result.push(f402);
-    }
-
-    return result;
-  }, [flats]);
+  }, [flats, settings.adminPhone]);
 
   // Flats registered to the active session user:
-  // - In Admin role: strictly adminFlats (Flat 101 & Flat 402)
-  // - In Resident role for Admin/Secretary: strictly adminFlats (Flat 101 & Flat 402)
-  // - In Resident role for normal residents: strictly their own units matching registered phone (e.g. Shops-02 & Flat 01 for Mr. Bilal)
+  // Strictly flats whose registered phone number matches the user's logged-in phone number!
   const userFlats = useMemo(() => {
     if (!currentSession) return [];
 
-    // 1. If currently in Admin role, strictly return admin's own flats (Flat 101 & Flat 402)
+    // The user's phone number in this session:
+    const sessionClean = (currentSession.phone || '').replace(/\D/g, '');
+    const sessionTen = sessionClean.length > 10 ? sessionClean.slice(-10) : sessionClean;
+
+    const adminClean = (settings.adminPhone || FIXED_ADMIN_PHONE || '8077649394').replace(/\D/g, '');
+    const adminTen = adminClean.length > 10 ? adminClean.slice(-10) : adminClean;
+
+    // 1. If currently in Admin role, strictly return admin's own flats matching admin's phone
     if (currentSession.role === 'admin') {
       return adminFlats;
     }
 
-    // 2. If in Resident role, check if active flat is one of admin's personal units
-    let currentFlat: FlatInfo | undefined;
-    if (currentSession.flatNumber) {
-      const cleanNum = normalizeFlatNumber(currentSession.flatNumber);
-      currentFlat = flats.find((f) => normalizeFlatNumber(f.flatNumber) === cleanNum);
-    }
-    if (!currentFlat && currentSession.flatId) {
-      currentFlat = flats.find((f) => f.id === currentSession.flatId);
-    }
+    // 2. If in Resident role:
+    // Determine the phone number to match against building flats:
+    // Primary: session phone number (the phone the user logged in with)
+    const phoneToMatch = sessionTen && sessionTen.length >= 7
+      ? sessionTen
+      : (currentSession.isCommitteeMember && adminTen && adminTen.length >= 7 ? adminTen : '');
 
-    const currentNorm = currentFlat ? normalizeFlatNumber(currentFlat.flatNumber) : '';
-    const isCurrentAdminUnit = currentNorm === 'flat-101' || currentNorm === 'flat-402';
-    const adminClean = (settings.adminPhone || FIXED_ADMIN_PHONE || '8077649394').replace(/\D/g, '');
-    const adminTen = adminClean.length > 10 ? adminClean.slice(-10) : adminClean;
-    const sessionClean = (currentSession.phone || '').replace(/\D/g, '');
-    const sessionTen = sessionClean.length > 10 ? sessionClean.slice(-10) : sessionClean;
-
-    // If currently viewing Flat 101 or Flat 402 as admin or with admin phone, strictly return Flat 101 and Flat 402
-    if (
-      isCurrentAdminUnit &&
-      (currentSession.isCommitteeMember || (sessionTen && adminTen && sessionTen === adminTen))
-    ) {
-      return adminFlats;
-    }
-
-    const residentPhones = new Set<string>();
-
-    // Use current flat's registered phone number as the primary identifier
-    if (currentFlat?.phone) {
-      const parts = currentFlat.phone.split(/[,/;\s]+/);
-      for (const p of parts) {
-        const clean = p.replace(/\D/g, '');
-        const ten = clean.length > 10 ? clean.slice(-10) : clean;
-        if (ten && ten.length >= 7) residentPhones.add(ten);
+    if (!phoneToMatch) {
+      // Fallback only if session has no phone at all: look up current flat
+      let cur: FlatInfo | undefined;
+      if (currentSession.flatId) {
+        cur = flats.find((f) => f.id === currentSession.flatId);
       }
-    }
-
-    // If resident is logged in on their own device (not admin previewing via committee member mode)
-    if (!currentSession.isCommitteeMember && currentSession.phone) {
-      const clean = currentSession.phone.replace(/\D/g, '');
-      const ten = clean.length > 10 ? clean.slice(-10) : clean;
-      if (ten && ten.length >= 7) residentPhones.add(ten);
-    }
-
-    if (residentPhones.size === 0) return currentFlat ? [currentFlat] : [];
-
-    const rawMatches = flats.filter((f) => {
-      for (const p of residentPhones) {
-        if (isPhoneMatch(f.phone, p)) return true;
+      if (!cur && currentSession.flatNumber) {
+        cur = flats.find((f) => normalizeFlatNumber(f.flatNumber) === normalizeFlatNumber(currentSession.flatNumber));
       }
-      return false;
-    });
+      return cur ? [cur] : [];
+    }
+
+    // Strictly match flats in the building that currently have this phone number registered!
+    const matches = flats.filter((f) => isPhoneMatch(f.phone, phoneToMatch));
 
     const seenNumbers = new Set<string>();
-    return rawMatches.filter((f) => {
+    return matches.filter((f) => {
       const key = normalizeFlatNumber(f.flatNumber);
       if (seenNumbers.has(key)) return false;
       seenNumbers.add(key);
       return true;
     });
   }, [currentSession, flats, adminFlats, settings.adminPhone]);
+
+  // Rapidly auto-sync active session if a flat's phone was removed or reassigned
+  useEffect(() => {
+    if (!currentSession || currentSession.role !== 'resident') return;
+    if (userFlats.length > 0) {
+      const isCurrentInUserFlats = userFlats.some((f) => f.id === currentSession.flatId);
+      if (!isCurrentInUserFlats) {
+        // Current flat no longer belongs to this user (e.g. phone removed from Flat 101)
+        // Immediately switch active session to user's first valid flat (e.g. Flat 402)
+        const nextFlat = userFlats[0];
+        setAndUnlockSession({
+          ...currentSession,
+          flatId: nextFlat.id,
+          flatNumber: nextFlat.flatNumber,
+          name: nextFlat.ownerName,
+        });
+      }
+    } else if (currentSession.phone) {
+      // Phone was removed from all flats in building -> log out
+      const curFlat = flats.find((f) => f.id === currentSession.flatId);
+      if (curFlat && !isPhoneMatch(curFlat.phone, currentSession.phone)) {
+        logout();
+      }
+    }
+  }, [userFlats, currentSession, flats]);
 
   const switchFlatView = (targetFlatId: string) => {
     let targetFlat = flats.find((f) => f.id === targetFlatId);

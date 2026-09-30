@@ -500,10 +500,14 @@ export const ProductionLogin: React.FC<ProductionLoginProps> = ({
             </div>
             <div className="flex-1 min-w-0">
               <h4 className="text-xs font-bold text-amber-950 uppercase tracking-wide">
-                Multiple Units Registered
+                {matchingFlats.length > 1 ? 'Multiple Units Registered' : 'Registered Unit'}
               </h4>
               <p className="text-xs text-amber-800 leading-snug mt-0.5">
-                Mobile number <span className="font-mono font-bold">+91 {getCleanDigits(phoneNumber).slice(-10)}</span> is linked with <strong>{matchingFlats.length} units</strong>. Select which one you want to view:
+                {matchingFlats.length > 1 ? (
+                  <>Mobile number <span className="font-mono font-bold">+91 {getCleanDigits(phoneNumber).slice(-10)}</span> is linked with <strong>{matchingFlats.length} units</strong>. Select which one you want to view:</>
+                ) : (
+                  <>Mobile number <span className="font-mono font-bold">+91 {getCleanDigits(phoneNumber).slice(-10)}</span> is linked with <strong>Flat {matchingFlats[0]?.flatNumber}</strong>. Choose flat or admin portal:</>
+                )}
               </p>
             </div>
           </div>

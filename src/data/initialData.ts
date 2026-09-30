@@ -18,7 +18,7 @@ export const INITIAL_SETTINGS: BuildingSettings = {
   adminPhone: '8077649394',
   adminEmail: 'shariqalig881@gmail.com',
   adminPassword: 'My1Build2@3',
-  adminFlatId: 'flat-101',
+  adminFlatId: 'flat-402',
 };
 
 // Authoritative 15 flats in the building
@@ -57,12 +57,12 @@ export const INITIAL_FLATS: FlatInfo[] = [
     id: 'flat-101',
     flatNumber: '101',
     floor: 1,
-    ownerName: 'Mr. Shariq Ansari',
-    phone: '8077649394',
+    ownerName: 'Resident 101',
+    phone: '',
     meterNumber: 'F-101',
     customRatePerUnit: 6,
     baselineReading: 4335,
-    pin: '4426',
+    pin: '',
   },
   {
     id: 'flat-102',

@@ -110,9 +110,9 @@ export const ResidentDashboard: React.FC = () => {
       const foundById = flats.find((f) => f.id === currentSession.flatId);
       if (foundById) return foundById;
     }
-    // Default to Flat 101 as primary unit
-    return flats.find((f) => normalizeFlatNumber(f.flatNumber) === 'flat-101' || f.flatNumber.trim() === '101') || flats[0];
-  }, [flats, currentSession?.flatId, currentSession?.flatNumber]);
+    // Default to user's registered flat or Flat 402 as primary unit
+    return userFlats[0] || flats.find((f) => normalizeFlatNumber(f.flatNumber) === 'flat-402' || f.flatNumber.trim() === '402') || flats[0];
+  }, [flats, currentSession?.flatId, currentSession?.flatNumber, userFlats]);
 
   // Resilient activeReading calculation: strictly uses authoritative recorded cycle amounts so it matches Admin exactly
   const activeReading = useMemo(() => {
