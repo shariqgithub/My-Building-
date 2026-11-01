@@ -3684,6 +3684,16 @@ export const AdminDashboard: React.FC = () => {
                 <span>Export Backup (JSON)</span>
               </button>
 
+              <a
+                href="/backup_data_3days_ago.json"
+                download="society_backup_3days_ago.json"
+                className="text-[11px] font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                title="Download the restored baseline backup from 3 days ago (August cycle & authentic baseline data)"
+              >
+                <Download className="w-3.5 h-3.5 text-amber-600" />
+                <span>3-Day-Ago Backup (JSON)</span>
+              </a>
+
               <label
                 className="text-[11px] font-bold text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
                 title="Restore resident names, flats, or billing data from a backup file"

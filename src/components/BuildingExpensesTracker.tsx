@@ -118,12 +118,24 @@ export const BuildingExpensesTracker: React.FC = () => {
     updateExpense,
     deleteExpense,
     setMonthlyManualCollection,
+    updateCycleReadings,
   } = useBuilding();
 
   // Selected Month / Cycle
   const [selectedMonthKey, setSelectedMonthKey] = useState<string>(() => {
-    return activeCycle?.monthKey || '2026-09';
+    return activeCycle?.monthKey || '2026-08';
   });
+
+  // Keep selectedMonthKey aligned with available cycles
+  React.useEffect(() => {
+    if (activeCycle?.monthKey && (!selectedMonthKey || !cycles.some((c) => c.monthKey === selectedMonthKey))) {
+      setSelectedMonthKey(activeCycle.monthKey);
+    }
+  }, [activeCycle?.monthKey, cycles, selectedMonthKey]);
+
+  // Dedicated Electricity Bill input state (Admin only)
+  const [electricityBillInput, setElectricityBillInput] = useState<string>('');
+  const [elecSavedSuccess, setElecSavedSuccess] = useState<string>('');
 
   // Modal State for adding/editing expense
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -237,6 +249,119 @@ export const BuildingExpensesTracker: React.FC = () => {
       }))
       .sort((a, b) => b.total - a.total);
   }, [currentMonthExpenses, totalMonthExpenses]);
+
+  // Distinct category totals for the requested breakdown (Bill + Cleaning + Plumber + etc.)
+  const currentElectricityExpense = useMemo(() => {
+    return currentMonthExpenses.find((e) => e.category === 'electricity_bill');
+  }, [currentMonthExpenses]);
+
+  const electricityAmount = useMemo(() => {
+    return currentMonthExpenses
+      .filter((e) => e.category === 'electricity_bill')
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  }, [currentMonthExpenses]);
+
+  const cleaningAmount = useMemo(() => {
+    return currentMonthExpenses
+      .filter((e) => e.category === 'house_cleaning')
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  }, [currentMonthExpenses]);
+
+  const plumberAmount = useMemo(() => {
+    return currentMonthExpenses
+      .filter((e) => e.category === 'plumber')
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  }, [currentMonthExpenses]);
+
+  const electricianAmount = useMemo(() => {
+    return currentMonthExpenses
+      .filter((e) => e.category === 'electrician')
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  }, [currentMonthExpenses]);
+
+  const sewerAmount = useMemo(() => {
+    return currentMonthExpenses
+      .filter((e) => e.category === 'sewer_cleaning')
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  }, [currentMonthExpenses]);
+
+  const waterTankAmount = useMemo(() => {
+    return currentMonthExpenses
+      .filter((e) => e.category === 'water_tank_motor')
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  }, [currentMonthExpenses]);
+
+  const otherExpensesAmount = useMemo(() => {
+    const mainCats = ['electricity_bill', 'house_cleaning', 'plumber', 'electrician', 'sewer_cleaning', 'water_tank_motor'];
+    return currentMonthExpenses
+      .filter((e) => !mainCats.includes(e.category))
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  }, [currentMonthExpenses]);
+
+  // Auto-sync input when month or current electricity bill changes
+  React.useEffect(() => {
+    if (currentElectricityExpense) {
+      setElectricityBillInput(String(currentElectricityExpense.amount));
+    } else if (targetCycle?.mainMeter?.mainMeterBillAmount) {
+      setElectricityBillInput(String(targetCycle.mainMeter.mainMeterBillAmount));
+    } else {
+      setElectricityBillInput('');
+    }
+  }, [selectedMonthKey, currentElectricityExpense?.id, currentElectricityExpense?.amount, targetCycle?.mainMeter?.mainMeterBillAmount]);
+
+  // Save or update electricity bill for this particular month
+  const handleSaveElectricityBill = (customVal?: string) => {
+    const rawVal = customVal !== undefined ? customVal : electricityBillInput;
+    const num = parseFloat(rawVal);
+
+    if (isNaN(num) || num <= 0) {
+      if (currentElectricityExpense) {
+        deleteExpense(currentElectricityExpense.id);
+        setElecSavedSuccess(`Electricity bill cleared for ${selectedMonthName}.`);
+        setTimeout(() => setElecSavedSuccess(''), 3500);
+      }
+      setElectricityBillInput('');
+      return;
+    }
+
+    if (currentElectricityExpense) {
+      updateExpense(currentElectricityExpense.id, {
+        amount: num,
+        monthKey: selectedMonthKey,
+        cycleId: targetCycle?.id,
+        title: currentElectricityExpense.title || `${settings.electricityBoard || 'Main Govt'} Electricity Bill (${selectedMonthName})`,
+        paidTo: currentElectricityExpense.paidTo || (settings.electricityBoard || 'Electricity Department'),
+      });
+    } else {
+      addExpense({
+        category: 'electricity_bill',
+        title: `${settings.electricityBoard || 'Main Govt'} Electricity Bill (${selectedMonthName})`,
+        amount: num,
+        monthKey: selectedMonthKey,
+        cycleId: targetCycle?.id,
+        date: `${selectedMonthKey}-05`,
+        paymentMethod: 'UPI',
+        paidTo: settings.electricityBoard || 'Electricity Department',
+        notes: 'Recorded by Admin under Building Expenses & Savings',
+      });
+    }
+
+    if (targetCycle && updateCycleReadings) {
+      const currentMainMeter = targetCycle.mainMeter || {
+        meterNumber: settings.commonMeterNumber || 'MAIN-01',
+        totalUnits: 0,
+        mainMeterBillAmount: num,
+      };
+      updateCycleReadings(
+        targetCycle.id,
+        targetCycle.readings,
+        { ...currentMainMeter, mainMeterBillAmount: num }
+      );
+    }
+
+    setElecSavedSuccess(`Electricity bill amount ₹${num.toLocaleString('en-IN')} successfully recorded for ${selectedMonthName}!`);
+    setTimeout(() => setElecSavedSuccess(''), 4000);
+  };
 
   // Filtered expenses list for search & category filter
   const displayedExpenses = useMemo(() => {
@@ -453,6 +578,222 @@ export const BuildingExpensesTracker: React.FC = () => {
             <span>{copiedMsg}</span>
           </div>
         )}
+      </div>
+
+      {/* ========================================================================= */}
+      {/* ADMIN-ONLY DEDICATED ELECTRICITY BILL PAID FIELD & LIVE CALCULATION STRIP */}
+      {/* ========================================================================= */}
+      <div className="bg-gradient-to-br from-amber-500/10 via-white to-amber-500/5 rounded-2xl border-2 border-amber-300 p-5 shadow-xs relative overflow-hidden">
+        {/* Subtle decorative background glow */}
+        <div className="absolute -right-6 -bottom-6 w-32 h-32 bg-amber-400/10 rounded-full blur-2xl pointer-events-none" />
+
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-amber-200/80 pb-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black bg-amber-500 text-white shadow-2xs">
+                <Zap className="w-3.5 h-3.5" />
+                Electricity Bill Amount Paid ({selectedMonthName})
+              </span>
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                <ShieldCheck className="w-3 h-3 text-indigo-600" />
+                Admin Only • Hidden from Flat Owners
+              </span>
+            </div>
+            <p className="text-xs text-slate-600 max-w-2xl leading-relaxed">
+              Enter the amount paid as the bill of electricity for <strong>{selectedMonthName}</strong>. 
+              The application calculates the whole amount (<strong>Electricity Bill + Cleaning + Plumber + Electrician, etc.</strong>) 
+              and shows the exact amount saved or paid out of pocket.
+            </p>
+          </div>
+
+          {/* Input & Save Button */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-bold text-sm">
+                ₹
+              </span>
+              <input
+                type="number"
+                value={electricityBillInput}
+                onChange={(e) => setElectricityBillInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSaveElectricityBill();
+                  }
+                }}
+                placeholder="Enter bill paid (e.g. 13800)"
+                className="w-full sm:w-56 pl-7 pr-3 py-2 text-sm font-black font-mono bg-white border-2 border-amber-400 focus:border-amber-600 focus:ring-2 focus:ring-amber-200 rounded-xl text-slate-900 shadow-2xs outline-none"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleSaveElectricityBill()}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-700 active:scale-98 text-white text-xs sm:text-sm font-bold rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Check className="w-4 h-4" />
+              <span>Save Bill</span>
+            </button>
+
+            {targetCycle?.mainMeter?.mainMeterBillAmount && targetCycle.mainMeter.mainMeterBillAmount !== parseFloat(electricityBillInput) && (
+              <button
+                type="button"
+                onClick={() => {
+                  const val = String(targetCycle.mainMeter!.mainMeterBillAmount);
+                  setElectricityBillInput(val);
+                  handleSaveElectricityBill(val);
+                }}
+                className="px-2.5 py-2 text-xs font-semibold text-amber-800 bg-amber-100/70 hover:bg-amber-200/80 rounded-xl border border-amber-300 transition-colors cursor-pointer"
+                title={`Quick fill from cycle reading bill: ₹${targetCycle.mainMeter.mainMeterBillAmount}`}
+              >
+                Use ₹{targetCycle.mainMeter.mainMeterBillAmount}
+              </button>
+            )}
+
+            {currentElectricityExpense && (
+              <button
+                type="button"
+                onClick={() => handleSaveElectricityBill('0')}
+                className="px-2.5 py-2 text-xs font-semibold text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-xl border border-rose-200 transition-colors cursor-pointer"
+                title="Clear electricity bill for this month"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Feedback Alert */}
+        {elecSavedSuccess && (
+          <div className="mt-3 p-2.5 bg-emerald-100 border border-emerald-300 rounded-xl text-xs font-bold text-emerald-900 flex items-center gap-2 animate-in fade-in">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{elecSavedSuccess}</span>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* LIVE CALCULATION BREAKDOWN: Whole Amount = Bill + Cleaning + Plumber + etc */}
+        {/* ========================================================================= */}
+        <div className="mt-4 pt-1 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+          {/* Left: Whole Amount Calculation Formula */}
+          <div className="bg-white/80 backdrop-blur-xs p-3.5 rounded-xl border border-amber-200/80 space-y-2">
+            <div className="flex items-center justify-between font-bold text-slate-900">
+              <span className="flex items-center gap-1.5">
+                <Receipt className="w-4 h-4 text-amber-600" />
+                Whole Building Expenses ({selectedMonthName}):
+              </span>
+              <span className="text-sm font-black font-mono text-rose-700">
+                ₹{totalMonthExpenses.toLocaleString('en-IN')}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] pt-1 border-t border-slate-100">
+              <div className="flex items-center justify-between text-slate-700">
+                <span className="flex items-center gap-1">⚡ Electricity Bill:</span>
+                <span className="font-bold font-mono text-slate-900">₹{electricityAmount.toLocaleString('en-IN')}</span>
+              </div>
+              <div className="flex items-center justify-between text-slate-700">
+                <span className="flex items-center gap-1">🧹 Cleaning:</span>
+                <span className="font-bold font-mono text-slate-900">₹{cleaningAmount.toLocaleString('en-IN')}</span>
+              </div>
+              <div className="flex items-center justify-between text-slate-700">
+                <span className="flex items-center gap-1">🔧 Plumber:</span>
+                <span className="font-bold font-mono text-slate-900">₹{plumberAmount.toLocaleString('en-IN')}</span>
+              </div>
+              <div className="flex items-center justify-between text-slate-700">
+                <span className="flex items-center gap-1">💡 Electrician:</span>
+                <span className="font-bold font-mono text-slate-900">₹{electricianAmount.toLocaleString('en-IN')}</span>
+              </div>
+              {sewerAmount > 0 && (
+                <div className="flex items-center justify-between text-slate-700">
+                  <span className="flex items-center gap-1">🕳️ Sewer:</span>
+                  <span className="font-bold font-mono text-slate-900">₹{sewerAmount.toLocaleString('en-IN')}</span>
+                </div>
+              )}
+              {waterTankAmount > 0 && (
+                <div className="flex items-center justify-between text-slate-700">
+                  <span className="flex items-center gap-1">💧 Water Motor:</span>
+                  <span className="font-bold font-mono text-slate-900">₹{waterTankAmount.toLocaleString('en-IN')}</span>
+                </div>
+              )}
+              {otherExpensesAmount > 0 && (
+                <div className="flex items-center justify-between text-slate-700">
+                  <span className="flex items-center gap-1">📦 Other Repairs:</span>
+                  <span className="font-bold font-mono text-slate-900">₹{otherExpensesAmount.toLocaleString('en-IN')}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="text-[10px] text-slate-500 pt-1 border-t border-slate-100 flex items-center justify-between">
+              <span>Formula: Bill + Cleaning + Plumber + Others</span>
+              <span className="font-bold text-slate-700">{currentMonthExpenses.length} expense items recorded</span>
+            </div>
+          </div>
+
+          {/* Right: Savings vs Paid Out-of-Pocket Result */}
+          <div
+            className={`p-3.5 rounded-xl border flex flex-col justify-between ${
+              isSurplus
+                ? 'bg-emerald-50/90 border-emerald-300 text-emerald-950'
+                : 'bg-rose-50/90 border-rose-300 text-rose-950'
+            }`}
+          >
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="font-bold flex items-center gap-1.5 uppercase text-[11px] tracking-wide">
+                  {isSurplus ? (
+                    <>
+                      <TrendingUp className="w-4 h-4 text-emerald-600" />
+                      <span>Monthly Result: Amount Saved (बचत)</span>
+                    </>
+                  ) : (
+                    <>
+                      <TrendingDown className="w-4 h-4 text-rose-600" />
+                      <span>Monthly Result: Paid from Own Pocket (घाटा)</span>
+                    </>
+                  )}
+                </span>
+                <span
+                  className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
+                    isSurplus ? 'bg-emerald-200 text-emerald-900' : 'bg-rose-200 text-rose-900'
+                  }`}
+                >
+                  {isSurplus ? 'Net Surplus' : 'Net Out-of-Pocket'}
+                </span>
+              </div>
+
+              <div className="flex items-baseline gap-2 mt-2">
+                <span
+                  className={`text-2xl font-black font-mono ${
+                    isSurplus ? 'text-emerald-700' : 'text-rose-700'
+                  }`}
+                >
+                  {isSurplus ? '+' : '-'}₹{netDifferenceAbs.toLocaleString('en-IN')}
+                </span>
+                <span className="text-xs text-slate-600 font-medium">
+                  {isSurplus ? 'saved in society funds' : 'paid from your own pocket'}
+                </span>
+              </div>
+
+              <div className="mt-2 text-[11px] leading-relaxed text-slate-700">
+                <div className="flex justify-between py-0.5">
+                  <span>Total Collected from Flats:</span>
+                  <span className="font-bold font-mono">₹{effectiveCollection.toLocaleString('en-IN')}</span>
+                </div>
+                <div className="flex justify-between py-0.5">
+                  <span>Whole Building Expenditures (Bill + Cleaning + Plumber, etc.):</span>
+                  <span className="font-bold font-mono text-rose-700">-₹{totalMonthExpenses.toLocaleString('en-IN')}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-2 pt-2 border-t border-slate-200/60 text-[10px] font-semibold text-slate-600 flex items-center justify-between">
+              <span>{isSurplus ? '✅ Reserve fund balance increased' : '⚠️ Collections did not cover total building bills'}</span>
+              <span>For {selectedMonthName}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* PRIMARY SAVINGS VS SPENT OUT-OF-POCKET BALANCE SHEET */}

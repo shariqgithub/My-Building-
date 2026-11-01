@@ -641,12 +641,16 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           ? FIXED_ADMIN_PHONE
           : parsed.adminPhone;
         const resolvedName = parsed.adminName || FIXED_ADMIN_NAME;
+        const resolvedAdminFlatId = (parsed.adminFlatId === 'flat-101' || !parsed.adminFlatId)
+          ? 'flat-402'
+          : parsed.adminFlatId;
 
         return {
           ...INITIAL_SETTINGS,
           ...parsed,
           adminName: resolvedName,
           adminPhone: resolvedPhone,
+          adminFlatId: resolvedAdminFlatId,
           upiQrCodeUrl: parsed.upiQrCodeUrl || undefined,
           defaultCommonMeterCharges: parsed.defaultCommonMeterCharges ?? 160,
           defaultCommonMeterLabel: parsed.defaultCommonMeterLabel || 'Water & stairs light',
@@ -769,7 +773,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [activeCycleId, setActiveCycleId] = useState<string>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.ACTIVE_CYCLE_ID);
-      if (saved) {
+      if (saved && saved !== 'cycle-2026-09') {
         return saved;
       }
       return INITIAL_CYCLES[0] ? INITIAL_CYCLES[0].id : 'cycle-2026-08';
@@ -946,7 +950,11 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (snapshot.exists()) {
             const data = snapshot.data();
             if (data.settings) {
-              setSettings((prev) => ({ ...prev, ...data.settings }));
+              const incoming = { ...data.settings };
+              if (incoming.adminFlatId === 'flat-101') {
+                incoming.adminFlatId = 'flat-402';
+              }
+              setSettings((prev) => ({ ...prev, ...incoming }));
             }
             let cloudFlats: FlatInfo[] = Array.isArray(data.flats) && data.flats.length > 0 ? [...data.flats] : [];
             let cloudCycles: BillingCycle[] = Array.isArray(data.cycles) && data.cycles.length > 0 ? [...data.cycles] : [];
@@ -1169,6 +1177,13 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       console.error(e);
     }
   }, [activeCycleId]);
+
+  // Ensure activeCycleId always exists in cycles list
+  useEffect(() => {
+    if (cycles.length > 0 && !cycles.some((c) => c.id === activeCycleId)) {
+      setActiveCycleId(cycles[0].id);
+    }
+  }, [cycles, activeCycleId]);
 
   useEffect(() => {
     try {
@@ -2231,10 +2246,12 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const adminCleanPhone = (settings.adminPhone || FIXED_ADMIN_PHONE || '8077649394').replace(/\D/g, '');
     const byPhone = flats.find((f) => isPhoneMatch(f.phone, adminCleanPhone));
     if (byPhone) return byPhone;
-    if (settings.adminFlatId) {
+    if (settings.adminFlatId && settings.adminFlatId !== 'flat-101') {
       const bySettings = flats.find((f) => f.id === settings.adminFlatId && !f.flatNumber.toLowerCase().includes('shop'));
       if (bySettings) return bySettings;
     }
+    const flat402 = flats.find((f) => f.id === 'flat-402' || normalizeFlatNumber(f.flatNumber) === 'flat-402');
+    if (flat402) return flat402;
     const nonShop = flats.find((f) => !f.flatNumber.toLowerCase().includes('shop') && !f.id.toLowerCase().includes('shop'));
     return nonShop || flats[0];
   };
@@ -2757,28 +2774,43 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Rapidly auto-sync active session if a flat's phone was removed or reassigned
   useEffect(() => {
-    if (!currentSession || currentSession.role !== 'resident') return;
-    if (userFlats.length > 0) {
-      const isCurrentInUserFlats = userFlats.some((f) => f.id === currentSession.flatId);
-      if (!isCurrentInUserFlats) {
-        // Current flat no longer belongs to this user (e.g. phone removed from Flat 101)
-        // Immediately switch active session to user's first valid flat (e.g. Flat 402)
-        const nextFlat = userFlats[0];
+    if (!currentSession) return;
+
+    if (currentSession.role === 'admin') {
+      if (adminFlats.length > 0 && !adminFlats.some((f) => f.id === currentSession.flatId)) {
+        const nextAdminFlat = adminFlats[0];
         setAndUnlockSession({
           ...currentSession,
-          flatId: nextFlat.id,
-          flatNumber: nextFlat.flatNumber,
-          name: nextFlat.ownerName,
+          flatId: nextAdminFlat.id,
+          flatNumber: nextAdminFlat.flatNumber,
         });
       }
-    } else if (currentSession.phone) {
-      // Phone was removed from all flats in building -> log out
-      const curFlat = flats.find((f) => f.id === currentSession.flatId);
-      if (curFlat && !isPhoneMatch(curFlat.phone, currentSession.phone)) {
-        logout();
+      return;
+    }
+
+    if (currentSession.role === 'resident') {
+      if (userFlats.length > 0) {
+        const isCurrentInUserFlats = userFlats.some((f) => f.id === currentSession.flatId);
+        if (!isCurrentInUserFlats) {
+          // Current flat no longer belongs to this user (e.g. phone removed from Flat 101)
+          // Immediately switch active session to user's first valid flat (e.g. Flat 402)
+          const nextFlat = userFlats[0];
+          setAndUnlockSession({
+            ...currentSession,
+            flatId: nextFlat.id,
+            flatNumber: nextFlat.flatNumber,
+            name: nextFlat.ownerName,
+          });
+        }
+      } else if (currentSession.phone) {
+        // Phone was removed from all flats in building -> log out
+        const curFlat = flats.find((f) => f.id === currentSession.flatId);
+        if (curFlat && !isPhoneMatch(curFlat.phone, currentSession.phone)) {
+          logout();
+        }
       }
     }
-  }, [userFlats, currentSession, flats]);
+  }, [userFlats, adminFlats, currentSession, flats]);
 
   const switchFlatView = (targetFlatId: string) => {
     let targetFlat = flats.find((f) => f.id === targetFlatId);
