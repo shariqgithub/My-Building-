@@ -53,6 +53,8 @@ export interface FlatReadingEntry {
   paymentMethod?: 'UPI' | 'Cash' | 'Bank Transfer' | 'Cheque' | 'Advance Credit';
   upiReference?: string;
   adminNotes?: string;
+  ownerName?: string; // Resident/Owner name recorded for this specific month
+  phone?: string; // Resident contact phone recorded for this specific month
 }
 
 export interface BillingCycle {
@@ -70,6 +72,7 @@ export interface BillingCycle {
   totalCollectedAmount: number;
   isLocked: boolean; // whether month is finalized
   customColumns?: CustomFeeColumn[]; // Dynamic fee columns e.g. [{ id: "col-1", name: "Building Charge", defaultAmount: 200 }]
+  flatsSnapshot?: FlatInfo[]; // Immutable snapshot of flats & resident details for this billing cycle
 }
 
 export interface BuildingSettings {

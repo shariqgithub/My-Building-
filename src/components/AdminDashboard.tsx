@@ -74,6 +74,7 @@ export const AdminDashboard: React.FC = () => {
     updateCustomFeeColumn,
     updateFlatCustomCharge,
     updateFlat,
+    getCycleFlats,
     updateFlatCustomRate,
     saveNewCycle,
     updateCycleDueDate,
@@ -103,6 +104,12 @@ export const AdminDashboard: React.FC = () => {
   const [showNewCycleModal, setShowNewCycleModal] = useState<boolean>(false);
   const [newCycleMonthName, setNewCycleMonthName] = useState<string>('');
   const [newCycleDueDate, setNewCycleDueDate] = useState<string>('');
+  const [newCycleResetResidents, setNewCycleResetResidents] = useState<boolean>(false);
+
+  // Active billing cycle flats (immutable per month)
+  const activeCycleFlats = React.useMemo(() => {
+    return getCycleFlats(activeCycle?.id);
+  }, [getCycleFlats, activeCycle?.id, cycles, flats]);
 
   // Reading Entry States
   const [selectedMonth, setSelectedMonth] = useState(activeCycle?.month || 'September 2026');
@@ -190,7 +197,7 @@ export const AdminDashboard: React.FC = () => {
         });
         const isShopF = (f.flatNumber || '').toLowerCase().includes('shop') || f.id.toLowerCase().includes('shop');
         map[f.id] = {
-          current: f.baselineReading + 100,
+          current: f.baselineReading,
           previous: f.baselineReading,
           commonMeterCharges: isShopF ? 0 : (settings.defaultCommonMeterCharges ?? 160),
           commonMeterLabel: settings.defaultCommonMeterLabel || 'Water & stairs light',
@@ -274,8 +281,8 @@ export const AdminDashboard: React.FC = () => {
   };
 
   const handleSaveFlatDetails = (flatId: string, updates: Partial<FlatInfo>) => {
-    updateFlat(flatId, updates);
-    setSaveSuccessMsg(`Flat ${updates.flatNumber || ''} details saved & synced to Cloud Database!`);
+    updateFlat(flatId, updates, activeCycle.id);
+    setSaveSuccessMsg(`Flat ${updates.flatNumber || ''} details saved for ${activeCycle.month} & synced!`);
     setTimeout(() => setSaveSuccessMsg(''), 4000);
   };
 
@@ -431,7 +438,7 @@ export const AdminDashboard: React.FC = () => {
     // 1. Update draft readings for all flats in AdminDashboard
     setDraftReadings((prev) => {
       const updated = { ...prev };
-      flats.forEach((f) => {
+      activeCycleFlats.forEach((f) => {
         updated[f.id] = {
           ...(updated[f.id] || {
             current: f.baselineReading + 100,
@@ -458,7 +465,7 @@ export const AdminDashboard: React.FC = () => {
     );
 
     setChargesSuccessMsg(
-      `Auto-applied ₹${finalCommonAmt} (${finalCommonLbl}) & ₹${finalMaintAmt} (${finalMaintLbl}) to all 15 flat bills! (Total fixed: ₹${finalCommonAmt + finalMaintAmt}/flat)`
+      `Auto-applied ₹${finalCommonAmt} (${finalCommonLbl}) & ₹${finalMaintAmt} (${finalMaintLbl}) to all flat bills! (Total fixed: ₹${finalCommonAmt + finalMaintAmt}/flat)`
     );
     setTimeout(() => setChargesSuccessMsg(''), 5000);
   };
@@ -469,7 +476,7 @@ export const AdminDashboard: React.FC = () => {
 
   // Calculate live preview of consumption & amounts
   const previewCalculation = computeMonthlyBills({
-    flats,
+    flats: activeCycleFlats,
     mainMeter: {
       mainMeterPreviousReading: mainPrevReading,
       mainMeterCurrentReading: mainCurrReading,
@@ -480,12 +487,14 @@ export const AdminDashboard: React.FC = () => {
     calculationMode: settings.calculationMode,
     defaultRatePerUnit: settings.defaultRatePerUnit,
     customColumns: activeCustomColumns,
-    readings: flats.map((f) => {
+    readings: activeCycleFlats.map((f) => {
       const isShop = (f.flatNumber || '').toLowerCase().includes('shop') || (f.id || '').toLowerCase().includes('shop');
       return {
         flatId: f.id,
+        ownerName: f.ownerName,
+        phone: f.phone,
         previousReading: draftReadings[f.id]?.previous ?? f.baselineReading,
-        currentReading: draftReadings[f.id]?.current ?? f.baselineReading + 100,
+        currentReading: draftReadings[f.id]?.current ?? (draftReadings[f.id]?.previous ?? f.baselineReading),
         maintenanceCharges: draftReadings[f.id]?.maintenanceCharges !== undefined
           ? draftReadings[f.id]?.maintenanceCharges
           : (isShop ? 0 : (settings.defaultMaintenanceCharges ?? 110)),
@@ -666,12 +675,17 @@ export const AdminDashboard: React.FC = () => {
 
   // Quick WhatsApp bill sender with user's exact required format
   const sendWhatsAppBill = (reading: FlatReadingEntry) => {
-    const flat = flats.find((f) => f.id === reading.flatId);
+    const flat = (activeCycle.flatsSnapshot && activeCycle.flatsSnapshot.length > 0
+      ? activeCycle.flatsSnapshot.find((f) => f.id === reading.flatId)
+      : undefined) || flats.find((f) => f.id === reading.flatId);
+    const ownerName = reading.ownerName || flat?.ownerName || `Flat ${reading.flatNumber} Resident`;
+    const phone = (reading.phone || flat?.phone || '').replace(/\D/g, '');
+
     const text = generateWhatsAppBillMessage({
       month: activeCycle.month,
       dueDate: activeCycle.dueDate || cycleDueDate,
       flatNumber: reading.flatNumber,
-      ownerName: flat?.ownerName || `Flat ${reading.flatNumber} Resident`,
+      ownerName: ownerName,
       previousReading: reading.previousReading,
       currentReading: reading.currentReading,
       unitsConsumed: reading.unitsConsumed,
@@ -688,7 +702,6 @@ export const AdminDashboard: React.FC = () => {
       previousBalance: reading.previousBalance,
       netPayableAmount: reading.netPayableAmount,
     });
-    const phone = flat?.phone.replace(/\D/g, '') || '';
     const url = phone.length === 10
       ? `https://wa.me/91${phone}?text=${encodeURIComponent(text)}`
       : `https://wa.me/?text=${encodeURIComponent(text)}`;
@@ -715,6 +728,7 @@ export const AdminDashboard: React.FC = () => {
     const d = new Date();
     d.setDate(d.getDate() + 10);
     setNewCycleDueDate(d.toISOString().split('T')[0]);
+    setNewCycleResetResidents(false);
     setShowNewCycleModal(true);
   };
 
@@ -723,9 +737,10 @@ export const AdminDashboard: React.FC = () => {
     const nextCycle = createNewCycle({
       month: newCycleMonthName.trim(),
       dueDate: newCycleDueDate.trim() || undefined,
+      resetResidentDetails: newCycleResetResidents,
     });
     setShowNewCycleModal(false);
-    setSaveSuccessMsg(`Started ${nextCycle.month} bill with Payment Due Date: ${nextCycle.dueDate}!`);
+    setSaveSuccessMsg(`Started ${nextCycle.month} bill! Past month records, bills, and expenses remain safely locked.`);
     setTimeout(() => setSaveSuccessMsg(''), 5000);
   };
 
@@ -1347,9 +1362,9 @@ export const AdminDashboard: React.FC = () => {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
-                  {flats.map((flat) => {
+                  {activeCycleFlats.map((flat) => {
                     const prev = draftReadings[flat.id]?.previous ?? flat.baselineReading;
-                    const curr = draftReadings[flat.id]?.current ?? prev + 100;
+                    const curr = draftReadings[flat.id]?.current ?? prev;
                     const units = Math.max(0, curr - prev);
                     const isInvalid = curr < prev;
 
@@ -1804,9 +1819,9 @@ export const AdminDashboard: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {flats.map((flat) => {
+                      {activeCycleFlats.map((flat) => {
                         const prev = draftReadings[flat.id]?.previous ?? flat.baselineReading;
-                        const curr = draftReadings[flat.id]?.current ?? prev + 100;
+                        const curr = draftReadings[flat.id]?.current ?? prev;
                         const units = Math.max(0, curr - prev);
                         const isInvalid = curr < prev;
 
@@ -2367,7 +2382,9 @@ export const AdminDashboard: React.FC = () => {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredReadings.map((reading) => {
-                      const flat = flats.find((f) => f.id === reading.flatId);
+                      const flat = activeCycleFlats.find((f) => f.id === reading.flatId) || flats.find((f) => f.id === reading.flatId);
+                      const residentName = reading.ownerName || flat?.ownerName || (flat?.flatNumber ? `Flat ${flat.flatNumber}` : `Flat ${reading.flatNumber}`);
+                      const residentPhone = reading.phone || flat?.phone || '';
                       const isPaid = reading.paymentStatus === 'paid';
                       const isPartiallyPaid = reading.paymentStatus === 'partially_paid';
                       const isPending = reading.paymentStatus === 'pending';
@@ -2383,8 +2400,8 @@ export const AdminDashboard: React.FC = () => {
                             {flat?.flatNumber || reading.flatNumber}
                           </td>
                           <td className="p-3">
-                            <div className="font-semibold text-slate-800">{flat?.ownerName || `Flat ${reading.flatNumber}`}</div>
-                            <div className="text-[11px] text-slate-400 font-mono">+91 {flat?.phone}</div>
+                            <div className="font-semibold text-slate-800">{residentName}</div>
+                            <div className="text-[11px] text-slate-400 font-mono">{residentPhone ? `+91 ${residentPhone}` : 'No phone registered'}</div>
                           </td>
                           <td className="p-3 text-center font-mono font-medium text-slate-700">
                             {reading.unitsConsumed}
@@ -2516,7 +2533,9 @@ export const AdminDashboard: React.FC = () => {
             /* Cards for each flat */
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
             {filteredReadings.map((reading) => {
-              const flat = flats.find((f) => f.id === reading.flatId);
+              const flat = activeCycleFlats.find((f) => f.id === reading.flatId) || flats.find((f) => f.id === reading.flatId);
+              const residentName = reading.ownerName || flat?.ownerName || (flat?.flatNumber ? `Flat ${flat.flatNumber}` : `Flat ${reading.flatNumber}`);
+              const residentPhone = reading.phone || flat?.phone || '';
               const isPaid = reading.paymentStatus === 'paid';
               const isPartiallyPaid = reading.paymentStatus === 'partially_paid';
               const isPending = reading.paymentStatus === 'pending';
@@ -2542,7 +2561,7 @@ export const AdminDashboard: React.FC = () => {
                             ? (flat?.flatNumber || reading.flatNumber)
                             : `Flat ${flat?.flatNumber || reading.flatNumber}`}
                         </span>
-                        <span className="text-xs text-slate-500">({flat?.ownerName})</span>
+                        <span className="text-xs text-slate-500">({residentName})</span>
                         <button
                           type="button"
                           onClick={() => flat && setEditingFlat(flat)}
@@ -2553,7 +2572,7 @@ export const AdminDashboard: React.FC = () => {
                         </button>
                       </div>
                       <span className="text-[11px] text-slate-400 font-mono">
-                        +91 {flat?.phone}
+                        {residentPhone ? `+91 ${residentPhone}` : 'No phone registered'}
                       </span>
                     </div>
 
@@ -3730,6 +3749,9 @@ export const AdminDashboard: React.FC = () => {
                 <Edit3 className="w-3 h-3 text-amber-600" />
                 Edit Building Name
               </button>
+              <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
+                🗓️ {activeCycle.month} Records
+              </span>
               <span className="text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg">
                 ✏️ Flat Number, Name & Phone are editable
               </span>
@@ -3751,7 +3773,7 @@ export const AdminDashboard: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {flats.map((flat) => (
+                {activeCycleFlats.map((flat) => (
                   <tr key={flat.id} className="hover:bg-slate-50/70">
                     <td className="p-2.5 font-bold font-mono text-slate-900">
                       <span className="inline-block px-2 py-0.5 rounded bg-slate-100 border border-slate-200">
@@ -4134,6 +4156,7 @@ export const AdminDashboard: React.FC = () => {
       {editingFlat && (
         <EditFlatModal
           flat={editingFlat}
+          cycleMonthName={activeCycle?.month}
           isOpen={true}
           onClose={() => setEditingFlat(null)}
           onSave={handleSaveFlatDetails}
@@ -4340,11 +4363,54 @@ export const AdminDashboard: React.FC = () => {
                 </p>
               </div>
 
-              <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-950">
-                <span className="font-bold">Automatic Balance Forwarding:</span>
-                <p className="text-[11px] text-emerald-900 mt-0.5 leading-relaxed">
-                  Any flat that has not paid previous dues will automatically have their pending amount carried forward. Any flat that paid in advance will have their credit deducted.
-                </p>
+              {/* Resident records option for the new month */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <span className="text-xs font-bold text-slate-800 block">
+                  Resident Details for {newCycleMonthName || 'New Month'}:
+                </span>
+                <div className="space-y-2 text-xs">
+                  <label className="flex items-start gap-2 cursor-pointer p-1.5 rounded-lg hover:bg-white transition-colors">
+                    <input
+                      type="radio"
+                      name="residentDetailsOption"
+                      checked={!newCycleResetResidents}
+                      onChange={() => setNewCycleResetResidents(false)}
+                      className="mt-0.5 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                    />
+                    <div>
+                      <span className="font-bold text-slate-800 block">All previous flat owners & numbers appear (Default)</span>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">
+                        Previous flat owner names and mobile numbers appear automatically. You can easily modify any flat's owner and number at any time without changing past months' records.
+                      </p>
+                    </div>
+                  </label>
+                  <label className="flex items-start gap-2 cursor-pointer p-1.5 rounded-lg hover:bg-white transition-colors">
+                    <input
+                      type="radio"
+                      name="residentDetailsOption"
+                      checked={newCycleResetResidents}
+                      onChange={() => setNewCycleResetResidents(true)}
+                      className="mt-0.5 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                    />
+                    <div>
+                      <span className="font-bold text-slate-800 block">Start with blank owner names & numbers</span>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">
+                        Leaves owner names & numbers empty if you want to type fresh tenant records from scratch.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Sub-Meter & Balance Notice */}
+              <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-950 space-y-1">
+                <span className="font-bold text-emerald-900 block">Automatic Sub-Meter & Billing Handover:</span>
+                <ul className="text-[11px] text-emerald-900 leading-relaxed list-disc list-inside space-y-1">
+                  <li><strong>Sub-Meter Readings:</strong> The current reading of the previous month automatically appears as the old/previous reading for that flat in {newCycleMonthName || 'the new month'}.</li>
+                  <li><strong>Editable at Any Time:</strong> You can modify any flat's owner name, mobile number, or readings whenever needed.</li>
+                  <li><strong>Building Expenses:</strong> Starts fresh with ₹0 recorded for {newCycleMonthName || 'the new month'} (previous months' expenses stay untouched).</li>
+                  <li><strong>Balances:</strong> Unpaid pending dues and surplus advance credits carry over automatically.</li>
+                </ul>
               </div>
             </div>
 

@@ -265,21 +265,25 @@ export const ResidentDashboard: React.FC = () => {
     });
   }, [expenses]);
 
-  // Current Month Building Expenses (visible to residents, excluding electricity bill)
+  // Current Month Building Expenses (visible to residents, strictly for currentViewCycle, excluding electricity bill)
   const currentMonthExpenses = useMemo(() => {
     const matched = residentExpenses.filter((exp) => {
-      if (exp.cycleId && currentViewCycle && exp.cycleId === currentViewCycle.id) return true;
-      if (exp.monthKey && currentMonthKey && exp.monthKey === currentMonthKey) return true;
-      if (exp.date && currentMonthKey && exp.date.startsWith(currentMonthKey)) return true;
+      // 1. If explicit cycleId is set, strictly match currentViewCycle.id
+      if (exp.cycleId) {
+        return currentViewCycle?.id ? exp.cycleId === currentViewCycle.id : false;
+      }
+      // 2. If explicit monthKey is set, strictly match currentMonthKey
+      if (exp.monthKey) {
+        return exp.monthKey === currentMonthKey;
+      }
+      // 3. Fallback only for untagged legacy expenses: check date prefix
+      if (exp.date && currentMonthKey && exp.date.startsWith(currentMonthKey)) {
+        return true;
+      }
       return false;
     });
 
-    if (matched.length > 0) {
-      return [...matched].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    }
-
-    // If no direct month match, show all society building expenses (excluding electricity bill)
-    return [...residentExpenses].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return [...matched].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [residentExpenses, currentMonthKey, currentViewCycle]);
 
   // Current month expenses total
@@ -293,10 +297,15 @@ export const ResidentDashboard: React.FC = () => {
       .filter((exp) => {
         // Month filter
         if (selectedExpenseMonthKey !== 'all') {
-          const matchMonth =
-            exp.monthKey === selectedExpenseMonthKey ||
-            (exp.cycleId && cycles.find((c) => c.id === exp.cycleId)?.monthKey === selectedExpenseMonthKey) ||
-            (exp.date && exp.date.startsWith(selectedExpenseMonthKey));
+          let matchMonth = false;
+          if (exp.cycleId) {
+            const expCycle = cycles.find((c) => c.id === exp.cycleId);
+            matchMonth = expCycle ? expCycle.monthKey === selectedExpenseMonthKey : (exp.monthKey === selectedExpenseMonthKey);
+          } else if (exp.monthKey) {
+            matchMonth = exp.monthKey === selectedExpenseMonthKey;
+          } else if (exp.date) {
+            matchMonth = exp.date.startsWith(selectedExpenseMonthKey);
+          }
           if (!matchMonth) return false;
         }
 

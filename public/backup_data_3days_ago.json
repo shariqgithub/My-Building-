@@ -2,7 +2,7 @@
   "app": "building-submeter-tracker",
   "version": 1,
   "description": "Society Data Backup (State from 3 days ago - August 2026 Cycle & Baseline Expenses)",
-  "exportedAt": "2026-11-01T20:24:04.827Z",
+  "exportedAt": "2026-11-01T21:54:22.183Z",
   "restoredFrom": "Baseline before recent September/October test cycle and recent ad-hoc expenses",
   "settings": {
     "defaultCommonMeterCharges": 160,
@@ -28,156 +28,157 @@
   "flats": [
     {
       "id": "shop-02",
-      "meterNumber": "Shops-02",
-      "baselineReading": 1240,
-      "phone": "9540293786",
-      "customRatePerUnit": 9,
       "flatNumber": "Shops-02",
       "floor": 0,
-      "ownerName": "Mr. Bilal"
+      "ownerName": "Mr. Bilal",
+      "phone": "9540293786",
+      "meterNumber": "Shops-02",
+      "customRatePerUnit": 9,
+      "baselineReading": 8589
     },
     {
-      "phone": "9540293786",
-      "baselineReading": 1480,
       "id": "flat-01",
+      "flatNumber": "01",
+      "floor": 0,
+      "ownerName": "Mr. Bilal",
+      "phone": "9540293786",
       "meterNumber": "F-01",
       "customRatePerUnit": 9,
-      "ownerName": "Mr. Bilal",
-      "flatNumber": "01",
-      "floor": 0
+      "baselineReading": 4261
     },
     {
-      "ownerName": "Mr. Mudassir",
-      "phone": "8860360124",
       "id": "flat-02",
-      "customRatePerUnit": 6,
       "flatNumber": "02",
       "floor": 0,
+      "ownerName": "Mr. Mudassir",
+      "phone": "8860360124",
       "meterNumber": "F-02",
-      "baselineReading": 1120
+      "customRatePerUnit": 6,
+      "baselineReading": 10844
     },
     {
       "id": "flat-101",
-      "customRatePerUnit": 9,
-      "ownerName": "Mr Raees",
-      "meterNumber": "F-101",
-      "phone": "8368530313",
-      "baselineReading": 1650,
       "flatNumber": "101",
-      "floor": 1
+      "floor": 1,
+      "ownerName": "Resident 101",
+      "phone": "",
+      "meterNumber": "F-101",
+      "customRatePerUnit": 6,
+      "baselineReading": 4335,
+      "pin": ""
     },
     {
-      "ownerName": "Mrs. Saniya Ansari",
-      "flatNumber": "102",
-      "phone": "8928037417",
-      "floor": 1,
-      "pin": "892803",
-      "baselineReading": 1390,
-      "meterNumber": "F-102",
       "id": "flat-102",
-      "customRatePerUnit": 6
+      "flatNumber": "102",
+      "floor": 1,
+      "ownerName": "Mrs. Saniya Ansari",
+      "phone": "8928037417",
+      "meterNumber": "F-102",
+      "customRatePerUnit": 6,
+      "baselineReading": 9774,
+      "pin": "892803"
     },
     {
       "id": "flat-103",
       "flatNumber": "103",
-      "customRatePerUnit": 6,
-      "phone": "9871322878",
-      "pin": "9871",
-      "meterNumber": "F-103",
+      "floor": 1,
       "ownerName": "Mr. Nasir",
-      "baselineReading": 1810,
-      "floor": 1
+      "phone": "9871322878",
+      "meterNumber": "F-103",
+      "customRatePerUnit": 6,
+      "baselineReading": 9525,
+      "pin": "9871"
     },
     {
-      "baselineReading": 1530,
       "id": "flat-201",
+      "flatNumber": "201",
       "floor": 2,
-      "meterNumber": "F-201",
       "ownerName": "Mr. Nadeem",
-      "customRatePerUnit": 9,
       "phone": "7428142100",
-      "flatNumber": "201"
+      "meterNumber": "F-201",
+      "customRatePerUnit": 9,
+      "baselineReading": 5412
     },
     {
-      "customRatePerUnit": 9,
+      "id": "flat-202",
+      "flatNumber": "202",
+      "floor": 2,
       "ownerName": "Mr. Nawab Uncle",
       "phone": "9999670399",
-      "baselineReading": 1740,
-      "id": "flat-202",
       "meterNumber": "F-202",
-      "flatNumber": "202",
-      "floor": 2
+      "customRatePerUnit": 9,
+      "baselineReading": 9784
     },
     {
-      "customRatePerUnit": 9,
-      "floor": 2,
       "id": "flat-203",
       "flatNumber": "203",
-      "phone": "9891165040",
-      "ownerName": "Mr. Shahid",
-      "baselineReading": 1420,
-      "meterNumber": "F-203"
+      "floor": 2,
+      "ownerName": "Mr. Raees",
+      "phone": "8368530313",
+      "meterNumber": "F-203",
+      "customRatePerUnit": 9,
+      "baselineReading": 9307
     },
     {
-      "floor": 3,
       "id": "flat-301",
       "flatNumber": "301",
+      "floor": 3,
       "ownerName": "Mr. Abid",
-      "baselineReading": 1960,
+      "phone": "9990377051",
       "meterNumber": "F-301",
       "customRatePerUnit": 9,
-      "phone": "9990377051"
+      "baselineReading": 3619
     },
     {
-      "phone": "8447502471",
-      "customRatePerUnit": 9,
-      "baselineReading": 1310,
       "id": "flat-302",
-      "ownerName": "Mr. Raja",
-      "floor": 3,
       "flatNumber": "302",
-      "meterNumber": "F-302"
-    },
-    {
-      "phone": "9717304467",
-      "ownerName": "Mr. Aquil",
       "floor": 3,
+      "ownerName": "Mr. Raja",
+      "phone": "8447502471",
+      "meterNumber": "F-302",
+      "customRatePerUnit": 9,
+      "baselineReading": 1445
+    },
+    {
       "id": "flat-303",
-      "customRatePerUnit": 9,
       "flatNumber": "303",
+      "floor": 3,
+      "ownerName": "Mr. Aquil",
+      "phone": "9717304467",
       "meterNumber": "F-303",
-      "baselineReading": 1670
-    },
-    {
-      "floor": 4,
-      "baselineReading": 1840,
-      "id": "flat-401",
       "customRatePerUnit": 9,
-      "flatNumber": "401",
-      "ownerName": "Mr. Gulzar",
-      "phone": "9140381532",
-      "meterNumber": "F-401"
+      "baselineReading": 5111
     },
     {
+      "id": "flat-401",
+      "flatNumber": "401",
       "floor": 4,
+      "ownerName": "Mr. Gappu",
+      "phone": "9897551459",
+      "meterNumber": "F-401",
+      "customRatePerUnit": 9,
+      "baselineReading": 5690
+    },
+    {
+      "id": "flat-402",
+      "flatNumber": "402",
+      "floor": 4,
+      "ownerName": "Mr. Shariq Ansari",
+      "phone": "8077649394",
       "meterNumber": "F-402",
       "customRatePerUnit": 6,
-      "ownerName": "Mr. Shariq Ansari",
-      "baselineReading": 1520,
-      "pin": "4426",
-      "phone": "8077649394",
-      "flatNumber": "402",
-      "id": "flat-402"
+      "baselineReading": 7708,
+      "pin": "4426"
     },
     {
       "id": "flat-403",
-      "floor": 4,
-      "baselineReading": 1730,
-      "customRatePerUnit": 9,
-      "meterNumber": "F-403",
       "flatNumber": "403",
-      "phone": "9897551459",
-      "ownerName": "Mr. Gappu"
+      "floor": 4,
+      "ownerName": "Mr. Mahmood",
+      "phone": "9899676658",
+      "meterNumber": "F-403",
+      "customRatePerUnit": 9,
+      "baselineReading": 1670
     }
   ],
   "cycles": [

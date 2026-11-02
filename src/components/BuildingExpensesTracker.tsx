@@ -165,11 +165,13 @@ export const BuildingExpensesTracker: React.FC = () => {
 
   // Identify the matching cycle for the selected month
   const targetCycle = useMemo(() => {
-    return (
+    if (!selectedMonthKey && activeCycle) return activeCycle;
+    const match =
       cycles.find((c) => c.monthKey === selectedMonthKey) ||
-      cycles.find((c) => c.month.toLowerCase().includes(selectedMonthKey.toLowerCase())) ||
-      activeCycle
-    );
+      cycles.find((c) => c.month.toLowerCase().includes(selectedMonthKey.toLowerCase()));
+    if (match) return match;
+    if (activeCycle?.monthKey === selectedMonthKey) return activeCycle;
+    return undefined;
   }, [cycles, selectedMonthKey, activeCycle]);
 
   // Selected Month Display Name
@@ -183,12 +185,21 @@ export const BuildingExpensesTracker: React.FC = () => {
     return selectedMonthKey;
   }, [targetCycle, selectedMonthKey]);
 
-  // Filter expenses strictly for this month
+  // Filter expenses strictly for this month (100% month isolation)
   const currentMonthExpenses = useMemo(() => {
     return expenses.filter((e) => {
-      if (e.cycleId && targetCycle && e.cycleId === targetCycle.id) return true;
-      if (e.monthKey === selectedMonthKey) return true;
-      if (e.date && e.date.startsWith(selectedMonthKey)) return true;
+      // 1. If expense is tagged with a cycleId: strictly match targetCycle.id
+      if (e.cycleId) {
+        return targetCycle?.id ? e.cycleId === targetCycle.id : false;
+      }
+      // 2. If expense is tagged with a monthKey: strictly match selectedMonthKey
+      if (e.monthKey) {
+        return e.monthKey === selectedMonthKey;
+      }
+      // 3. Fallback only for untagged legacy expenses: check if date starts with selectedMonthKey
+      if (e.date && e.date.startsWith(selectedMonthKey)) {
+        return true;
+      }
       return false;
     });
   }, [expenses, selectedMonthKey, targetCycle]);
@@ -382,7 +393,19 @@ export const BuildingExpensesTracker: React.FC = () => {
     setCategory(presetCategory || 'electricity_bill');
     setTitle(presetTitle || (presetCategory ? CATEGORY_CONFIG[presetCategory]?.label : ''));
     setAmount(presetAmount !== undefined && presetAmount > 0 ? String(presetAmount) : '');
-    setDate(new Date().toISOString().split('T')[0]);
+
+    // Default date to a day within selectedMonthKey so it is strictly rooted in this month
+    const now = new Date();
+    const todayDay = String(now.getDate()).padStart(2, '0');
+    const [y, m] = selectedMonthKey.split('-');
+    let defaultDate = new Date().toISOString().split('T')[0];
+    if (y && m) {
+      const daysInMonth = new Date(parseInt(y, 10), parseInt(m, 10), 0).getDate();
+      const clampedDay = Math.min(parseInt(todayDay, 10) || 1, daysInMonth);
+      defaultDate = `${y}-${m}-${String(clampedDay).padStart(2, '0')}`;
+    }
+
+    setDate(defaultDate);
     setPaidTo('');
     setPaymentMethod('UPI');
     setReceiptNumber('');
@@ -418,12 +441,21 @@ export const BuildingExpensesTracker: React.FC = () => {
       return;
     }
 
+    const [y, m] = selectedMonthKey.split('-');
+    let fallbackDate = new Date().toISOString().split('T')[0];
+    if (y && m) {
+      fallbackDate = `${y}-${m}-01`;
+    }
+
     if (editingExpenseId) {
+      const existing = expenses.find((exp) => exp.id === editingExpenseId);
       updateExpense(editingExpenseId, {
         category,
         title: title.trim(),
         amount: numAmount,
-        date,
+        date: date || existing?.date || fallbackDate,
+        monthKey: existing?.monthKey || selectedMonthKey,
+        cycleId: existing?.cycleId || targetCycle?.id,
         paidTo: paidTo.trim() || undefined,
         paymentMethod,
         receiptNumber: receiptNumber.trim() || undefined,
@@ -436,7 +468,7 @@ export const BuildingExpensesTracker: React.FC = () => {
         category,
         title: title.trim(),
         amount: numAmount,
-        date,
+        date: date || fallbackDate,
         paidTo: paidTo.trim() || undefined,
         paymentMethod,
         receiptNumber: receiptNumber.trim() || undefined,

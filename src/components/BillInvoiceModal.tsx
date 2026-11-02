@@ -38,11 +38,19 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
 
   if (!isOpen) return null;
 
-  const flat = flats.find(
+  const flat = (cycle?.flatsSnapshot && cycle.flatsSnapshot.length > 0
+    ? cycle.flatsSnapshot.find(
+        (f) =>
+          (reading.flatNumber && normalizeFlatNumber(f.flatNumber) === normalizeFlatNumber(reading.flatNumber)) ||
+          f.id === reading.flatId
+      )
+    : undefined) || flats.find(
     (f) =>
       (reading.flatNumber && normalizeFlatNumber(f.flatNumber) === normalizeFlatNumber(reading.flatNumber)) ||
       f.id === reading.flatId
   );
+  const residentName = reading.ownerName || flat?.ownerName || `Resident`;
+  const residentPhone = reading.phone || flat?.phone || '';
   const isAdmin = currentSession?.role === 'admin';
 
   // Strict rate & bill alignment: use recorded official amounts if available, fallback with exact same formulas
@@ -126,8 +134,8 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
     <div>
       <div class="grid-label">Flat / Shop Information</div>
       <div class="grid-val">${reading.flatNumber.toLowerCase().includes('shop') ? reading.flatNumber : `Flat ${reading.flatNumber}`}</div>
-      <div style="color: #475569; font-size: 12px;">${flat?.ownerName || `Resident`}</div>
-      <div style="color: #64748b; font-size: 11px;">+91 ${flat?.phone || ''}</div>
+      <div style="color: #475569; font-size: 12px;">${residentName}</div>
+      <div style="color: #64748b; font-size: 11px;">+91 ${residentPhone}</div>
     </div>
     <div>
       <div class="grid-label">Sub-Meter Number</div>
@@ -263,7 +271,7 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
       month: cycle.month,
       dueDate: cycle.dueDate,
       flatNumber: reading.flatNumber,
-      ownerName: flat?.ownerName || `Flat ${reading.flatNumber} Owner`,
+      ownerName: residentName,
       previousReading: reading.previousReading,
       currentReading: reading.currentReading,
       unitsConsumed: reading.unitsConsumed,
@@ -281,7 +289,7 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
       netPayableAmount: effectiveNetPayable,
     });
 
-    const phone = flat?.phone.replace(/\D/g, '') || '';
+    const phone = residentPhone.replace(/\D/g, '') || '';
     const url = phone.length === 10
       ? `https://wa.me/91${phone}?text=${encodeURIComponent(text)}`
       : `https://wa.me/?text=${encodeURIComponent(text)}`;
@@ -406,8 +414,8 @@ export const BillInvoiceModal: React.FC<BillInvoiceModalProps> = ({
             <div>
               <span className="text-[10px] text-slate-400 uppercase font-semibold block">Flat Details</span>
               <p className="font-bold text-slate-900 text-sm">Flat No. {reading.flatNumber}</p>
-              <p className="text-slate-600 font-medium">{flat?.ownerName}</p>
-              <p className="text-slate-500 font-mono text-[11px]">+91 {flat?.phone}</p>
+              <p className="text-slate-600 font-medium">{residentName}</p>
+              <p className="text-slate-500 font-mono text-[11px]">{residentPhone ? `+91 ${residentPhone}` : 'No phone linked'}</p>
             </div>
             <div>
               <span className="text-[10px] text-slate-400 uppercase font-semibold block">Sub-Meter Info</span>

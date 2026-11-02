@@ -57,7 +57,8 @@ interface BuildingContextType {
     autoApplyToCycles?: boolean
   ) => void;
   updateChargeLabels: (labels: { commonMeterLabel?: string; maintenanceLabel?: string }) => void;
-  updateFlat: (flatId: string, updates: Partial<FlatInfo>) => void;
+  updateFlat: (flatId: string, updates: Partial<FlatInfo>, targetCycleId?: string) => void;
+  getCycleFlats: (cycleId?: string) => FlatInfo[];
   updateFlatCustomRate: (flatId: string, rate: number | undefined) => void;
   saveNewCycle: (cycle: BillingCycle) => void;
   createNewCycle: (params?: {
@@ -65,6 +66,7 @@ interface BuildingContextType {
     dueDate?: string;
     mainMeterUnits?: number;
     mainMeterBillAmount?: number;
+    resetResidentDetails?: boolean;
   }) => BillingCycle;
   updateCycleDueDate: (cycleId: string, dueDate: string) => void;
   updateCycleReadings: (
@@ -620,9 +622,28 @@ export const deduplicateFlatsAndCycles = (
       })
       .filter((r): r is FlatReadingEntry => Boolean(r));
 
+    const cycleSnapshot = (c.flatsSnapshot && c.flatsSnapshot.length > 0)
+      ? c.flatsSnapshot
+      : cleanedFlats.map((f) => {
+          const r = readingMap.get(f.id);
+          return {
+            ...f,
+            ownerName: r?.ownerName || f.ownerName,
+            phone: r?.phone || f.phone,
+          };
+        });
+
     return {
       ...c,
-      readings: validReadings,
+      flatsSnapshot: cycleSnapshot,
+      readings: validReadings.map((r) => {
+        const snapFlat = cycleSnapshot.find((sf) => sf.id === r.flatId);
+        return {
+          ...r,
+          ownerName: r.ownerName || snapFlat?.ownerName,
+          phone: r.phone || snapFlat?.phone,
+        };
+      }),
     };
   });
 
@@ -1736,28 +1757,74 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const updateFlat = (flatId: string, updates: Partial<FlatInfo>) => {
-    const updatedFlats = flats.map((f) => (f.id === flatId ? { ...f, ...updates } : f));
-    setFlats(updatedFlats);
-    try {
-      localStorage.setItem(STORAGE_KEYS.FLATS, JSON.stringify(updatedFlats));
-    } catch {}
+  const getCycleFlats = (cycleId?: string): FlatInfo[] => {
+    const targetId = cycleId || activeCycleId;
+    const cycle = cycles.find((c) => c.id === targetId);
+    if (cycle?.flatsSnapshot && cycle.flatsSnapshot.length > 0) {
+      return cycle.flatsSnapshot;
+    }
+    return flats;
+  };
 
-    let updatedCycles = cycles;
-    // If flatNumber is updated, sync it across all billing cycles
-    if (updates.flatNumber) {
-      const newFlatNumber = updates.flatNumber;
-      updatedCycles = cycles.map((c) => ({
-        ...c,
-        readings: c.readings.map((r) =>
-          r.flatId === flatId ? { ...r, flatNumber: newFlatNumber } : r
-        ),
-      }));
-      setCycles(updatedCycles);
+  const updateFlat = (flatId: string, updates: Partial<FlatInfo>, targetCycleId?: string) => {
+    const cycleIdToUpdate = targetCycleId || activeCycleId;
+    const latestCycle = cycles.reduce((latest, c) => ((c.monthKey || c.id) > ((latest?.monthKey || latest?.id) || '') ? c : latest), cycles[0]);
+    const isEditingLatest = !targetCycleId || (latestCycle && targetCycleId === latestCycle.id);
+
+    // If editing latest active cycle, also update global flats so future newly created months inherit latest resident
+    let updatedFlats = flats;
+    if (isEditingLatest) {
+      updatedFlats = flats.map((f) => (f.id === flatId ? { ...f, ...updates } : f));
+      setFlats(updatedFlats);
       try {
-        localStorage.setItem(STORAGE_KEYS.CYCLES, JSON.stringify(updatedCycles));
+        localStorage.setItem(STORAGE_KEYS.FLATS, JSON.stringify(updatedFlats));
       } catch {}
     }
+
+    // Update the targeted cycle's flatsSnapshot & readings WITHOUT mutating previous historical months
+    const updatedCycles = cycles.map((c) => {
+      // If a specific cycle was targeted and this is not that cycle:
+      if (cycleIdToUpdate && c.id !== cycleIdToUpdate) {
+        // Keep previous month's resident name, phone, and bill strictly frozen!
+        if (updates.flatNumber) {
+          return {
+            ...c,
+            readings: c.readings.map((r) =>
+              r.flatId === flatId ? { ...r, flatNumber: updates.flatNumber! } : r
+            ),
+          };
+        }
+        return c;
+      }
+
+      // Update snapshot for this month
+      const currentSnapshot = (c.flatsSnapshot && c.flatsSnapshot.length > 0) ? c.flatsSnapshot : flats;
+      const updatedSnapshot = currentSnapshot.map((f) => (f.id === flatId ? { ...f, ...updates } : f));
+
+      // Update readings entry for this month
+      const updatedReadings = c.readings.map((r) => {
+        if (r.flatId === flatId) {
+          return {
+            ...r,
+            flatNumber: updates.flatNumber || r.flatNumber,
+            ownerName: updates.ownerName !== undefined ? updates.ownerName : r.ownerName,
+            phone: updates.phone !== undefined ? updates.phone : r.phone,
+          };
+        }
+        return r;
+      });
+
+      return {
+        ...c,
+        flatsSnapshot: updatedSnapshot,
+        readings: updatedReadings,
+      };
+    });
+
+    setCycles(updatedCycles);
+    try {
+      localStorage.setItem(STORAGE_KEYS.CYCLES, JSON.stringify(updatedCycles));
+    } catch {}
 
     // Persist directly to Firestore
     saveToCloud(undefined, updatedFlats, updatedCycles);
@@ -1797,6 +1864,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     dueDate?: string;
     mainMeterUnits?: number;
     mainMeterBillAmount?: number;
+    resetResidentDetails?: boolean;
   }): BillingCycle => {
     // Determine next month based on activeCycle
     const currentMonthKey = activeCycle?.monthKey || '2026-08';
@@ -1815,31 +1883,65 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const nextMonthName = params?.month || `${monthNames[monthNum - 1]} ${year}`;
     const nextCycleId = `cycle-${nextMonthKey}`;
 
-    // Read previous readings from active cycle's current readings
+    // Read previous readings from active cycle's current readings:
+    // The current reading of the previous month appears as old / previous reading in current month!
     const previousReadingMap = new Map<string, number>();
     if (activeCycle) {
       activeCycle.readings.forEach((r) => {
-        previousReadingMap.set(r.flatId, r.currentReading);
+        const prevMonthCurrentReading =
+          (r.currentReading !== undefined && !isNaN(r.currentReading) && r.currentReading > 0)
+            ? r.currentReading
+            : (r.previousReading || 0);
+        previousReadingMap.set(r.flatId, prevMonthCurrentReading);
+        if (r.flatNumber) {
+          previousReadingMap.set(normalizeFlatNumber(r.flatNumber), prevMonthCurrentReading);
+        }
       });
     }
 
-    const defaultMainUnits = params?.mainMeterUnits || activeCycle?.mainMeter.mainMeterUnits || 1900;
-    const defaultMainBill = params?.mainMeterBillAmount || activeCycle?.mainMeter.mainMeterBillAmount || 15200;
+    const defaultMainUnits = params?.mainMeterUnits || 0;
+    const defaultMainBill = params?.mainMeterBillAmount || 0;
     const defaultPrevMain = activeCycle?.mainMeter.mainMeterCurrentReading || 48000;
     const defaultCurrMain = defaultPrevMain + defaultMainUnits;
 
     const cycleCustomColumns: CustomFeeColumn[] = activeCycle?.customColumns || settings.customFeeColumns || [];
 
-    // Create preliminary flat readings
-    const newReadings: FlatReadingEntry[] = flats.map((f) => {
-      const prevReading = previousReadingMap.get(f.id) ?? f.baselineReading;
-      const currReading = prevReading + 100;
-      const units = currReading - prevReading;
+    // Snapshot flats for the new month:
+    // All previous flat owner's name and numbers appear by default!
+    // Inherit directly from active cycle's snapshot and readings so any prior updates are carried forward:
+    const prevCycleFlats = (activeCycle?.flatsSnapshot && activeCycle.flatsSnapshot.length > 0)
+      ? activeCycle.flatsSnapshot
+      : flats;
+
+    const newCycleFlats: FlatInfo[] = prevCycleFlats.map((f) => {
+      const prevReading = activeCycle?.readings.find(
+        (r) => r.flatId === f.id || (r.flatNumber && normalizeFlatNumber(r.flatNumber) === normalizeFlatNumber(f.flatNumber))
+      );
+      const prevOwnerName = prevReading?.ownerName || f.ownerName || '';
+      const prevPhone = prevReading?.phone || f.phone || '';
+      return {
+        ...f,
+        ownerName: params?.resetResidentDetails ? '' : prevOwnerName,
+        phone: params?.resetResidentDetails ? '' : prevPhone,
+        pin: params?.resetResidentDetails ? undefined : f.pin,
+      };
+    });
+
+    // Create preliminary flat readings: start clean with 0 units consumed
+    // Sub-meter reading: current reading of previous month appears as old or previous reading in current month!
+    const newReadings: FlatReadingEntry[] = newCycleFlats.map((f) => {
+      const prevReading =
+        previousReadingMap.get(f.id) ??
+        previousReadingMap.get(normalizeFlatNumber(f.flatNumber)) ??
+        f.baselineReading ??
+        0;
+      const currReading = prevReading; // Starts exactly equal to prevReading (0 units consumed initially)
+      const units = 0;
       const rate =
         f.customRatePerUnit !== undefined && f.customRatePerUnit > 0
           ? f.customRatePerUnit
           : settings.defaultRatePerUnit;
-      const energy = units * rate;
+      const energy = 0;
       const isShop = f.flatNumber.toLowerCase().includes('shop') || f.id.toLowerCase().includes('shop');
       const common = isShop ? 0 : (settings.defaultCommonMeterCharges ?? 160);
       const maint = isShop ? 0 : (settings.defaultMaintenanceCharges ?? 110);
@@ -1859,9 +1961,9 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         flatNumber: f.flatNumber,
         previousReading: prevReading,
         currentReading: currReading,
-        unitsConsumed: units,
+        unitsConsumed: 0,
         ratePerUnit: rate,
-        calculatedAmount: energy,
+        calculatedAmount: 0,
         commonShareAmount: common,
         maintenanceCharges: maint,
         maintenanceLabel: settings.defaultMaintenanceLabel || 'Cleaning',
@@ -1869,7 +1971,9 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         commonMeterLabel: settings.defaultCommonMeterLabel || 'Water & stairs light',
         customCharges,
         totalBillAmount: total,
-        paymentStatus: 'unpaid',
+        paymentStatus: 'unpaid' as const,
+        ownerName: f.ownerName,
+        phone: f.phone,
       };
     });
 
@@ -1887,13 +1991,14 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         mainMeterBillAmount: defaultMainBill,
         commonAreaRule: 'divide_by_flat_units',
       },
-      totalSubMeterUnits: newReadings.reduce((acc, r) => acc + r.unitsConsumed, 0),
+      totalSubMeterUnits: 0,
       effectiveRatePerUnit: settings.defaultRatePerUnit,
       totalBilledAmount: newReadings.reduce((acc, r) => acc + r.totalBillAmount, 0),
       totalCollectedAmount: 0,
       isLocked: false,
       readings: newReadings,
       customColumns: cycleCustomColumns,
+      flatsSnapshot: newCycleFlats,
     };
 
     let finalUpdatedCycles: BillingCycle[] = [];
@@ -3178,6 +3283,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         switchFlatView,
         addFlat,
         deleteFlat,
+        getCycleFlats,
         loginAsAdmin,
         loginAsAdminWithPassword,
         sendAdminEmailOtp,

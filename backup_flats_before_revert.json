@@ -1,0 +1,155 @@
+[
+  {
+    "phone": "9540293786",
+    "customRatePerUnit": 9,
+    "floor": 0,
+    "id": "shop-02",
+    "ownerName": "Mr. Bilal",
+    "meterNumber": "Shops-02",
+    "baselineReading": 1240,
+    "flatNumber": "Shops-02"
+  },
+  {
+    "meterNumber": "F-01",
+    "baselineReading": 1480,
+    "customRatePerUnit": 9,
+    "ownerName": "Mr. Bilal",
+    "floor": 0,
+    "flatNumber": "01",
+    "id": "flat-01",
+    "phone": "9540293786"
+  },
+  {
+    "customRatePerUnit": 6,
+    "floor": 0,
+    "ownerName": "Mr. Mudassir",
+    "baselineReading": 1120,
+    "id": "flat-02",
+    "phone": "8860360124",
+    "meterNumber": "F-02",
+    "flatNumber": "02"
+  },
+  {
+    "meterNumber": "F-101",
+    "baselineReading": 1650,
+    "flatNumber": "101",
+    "id": "flat-101",
+    "ownerName": "Mr Raees",
+    "floor": 1,
+    "customRatePerUnit": 9,
+    "phone": "8368530313"
+  },
+  {
+    "floor": 1,
+    "baselineReading": 1390,
+    "meterNumber": "F-102",
+    "id": "flat-102",
+    "customRatePerUnit": 6,
+    "phone": "8928037417",
+    "flatNumber": "102",
+    "pin": "892803",
+    "ownerName": "Mrs. Saniya Ansari"
+  },
+  {
+    "baselineReading": 1810,
+    "ownerName": "Mr. Nasir",
+    "phone": "9871322878",
+    "customRatePerUnit": 6,
+    "pin": "9871",
+    "flatNumber": "103",
+    "meterNumber": "F-103",
+    "floor": 1,
+    "id": "flat-103"
+  },
+  {
+    "flatNumber": "201",
+    "customRatePerUnit": 9,
+    "meterNumber": "F-201",
+    "floor": 2,
+    "ownerName": "Mr. Nadeem",
+    "id": "flat-201",
+    "baselineReading": 1530,
+    "phone": "7428142100"
+  },
+  {
+    "meterNumber": "F-202",
+    "ownerName": "Mr. Nawab Uncle",
+    "flatNumber": "202",
+    "phone": "9999670399",
+    "customRatePerUnit": 9,
+    "baselineReading": 1740,
+    "floor": 2,
+    "id": "flat-202"
+  },
+  {
+    "customRatePerUnit": 9,
+    "meterNumber": "F-203",
+    "ownerName": "Mr. Shahid",
+    "floor": 2,
+    "baselineReading": 1420,
+    "phone": "9891165040",
+    "flatNumber": "203",
+    "id": "flat-203"
+  },
+  {
+    "meterNumber": "F-301",
+    "customRatePerUnit": 9,
+    "id": "flat-301",
+    "floor": 3,
+    "baselineReading": 1960,
+    "flatNumber": "301",
+    "ownerName": "Mr. Abid",
+    "phone": "9990377051"
+  },
+  {
+    "phone": "8447502471",
+    "customRatePerUnit": 9,
+    "ownerName": "Mr. Raja",
+    "baselineReading": 1310,
+    "flatNumber": "302",
+    "id": "flat-302",
+    "floor": 3,
+    "meterNumber": "F-302"
+  },
+  {
+    "phone": "9717304467",
+    "floor": 3,
+    "meterNumber": "F-303",
+    "id": "flat-303",
+    "customRatePerUnit": 9,
+    "baselineReading": 1670,
+    "ownerName": "Mr. Aquil",
+    "flatNumber": "303"
+  },
+  {
+    "flatNumber": "401",
+    "phone": "9140381532",
+    "customRatePerUnit": 9,
+    "floor": 4,
+    "ownerName": "Mr. Gulzar",
+    "id": "flat-401",
+    "baselineReading": 1840,
+    "meterNumber": "F-401"
+  },
+  {
+    "baselineReading": 1520,
+    "phone": "8077649394",
+    "flatNumber": "402",
+    "meterNumber": "F-402",
+    "floor": 4,
+    "customRatePerUnit": 6,
+    "pin": "4426",
+    "id": "flat-402",
+    "ownerName": "Mr. Shariq Ansari"
+  },
+  {
+    "flatNumber": "403",
+    "id": "flat-403",
+    "ownerName": "Mr. Gappu",
+    "meterNumber": "F-403",
+    "customRatePerUnit": 9,
+    "floor": 4,
+    "phone": "9897551459",
+    "baselineReading": 1730
+  }
+]

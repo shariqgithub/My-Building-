@@ -7,6 +7,7 @@ interface EditFlatModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (flatId: string, updates: Partial<FlatInfo>) => void;
+  cycleMonthName?: string;
 }
 
 export const EditFlatModal: React.FC<EditFlatModalProps> = ({
@@ -14,6 +15,7 @@ export const EditFlatModal: React.FC<EditFlatModalProps> = ({
   isOpen,
   onClose,
   onSave,
+  cycleMonthName,
 }) => {
   const [flatNumber, setFlatNumber] = useState('');
   const [ownerName, setOwnerName] = useState('');
@@ -103,10 +105,10 @@ export const EditFlatModal: React.FC<EditFlatModalProps> = ({
             </div>
             <div>
               <h3 className="text-sm font-bold leading-none">
-                Edit Flat Details • {flat.flatNumber}
+                Edit Flat Details • {flat.flatNumber} {cycleMonthName ? `• ${cycleMonthName}` : ''}
               </h3>
               <p className="text-[11px] text-amber-100 mt-0.5">
-                Update flat number, resident name, and mobile number
+                {cycleMonthName ? `Updates owner & phone for ${cycleMonthName} (past bills remain safe)` : 'Update flat number, resident name, and mobile number'}
               </p>
             </div>
           </div>

@@ -19,6 +19,8 @@ export interface ComputeBillParams {
     advanceAmount?: number;
     previousBalance?: number;
     paidAmount?: number;
+    ownerName?: string;
+    phone?: string;
   }>;
 }
 
@@ -46,6 +48,8 @@ export function computeMonthlyBills(params: ComputeBillParams): {
       advanceAmount: number;
       previousBalance: number;
       paidAmount?: number;
+      ownerName?: string;
+      phone?: string;
     }
   >();
   let totalSubMeterUnits = 0;
@@ -73,6 +77,8 @@ export function computeMonthlyBills(params: ComputeBillParams): {
       advanceAmount: advance,
       previousBalance: r.previousBalance ?? (pending - advance),
       paidAmount: r.paidAmount,
+      ownerName: r.ownerName,
+      phone: r.phone,
     });
     totalSubMeterUnits += units;
   });
@@ -161,6 +167,8 @@ export function computeMonthlyBills(params: ComputeBillParams): {
       paymentStatus: status,
       paidDate: isCoveredByAdvance ? new Date().toISOString().split('T')[0] : undefined,
       paymentMethod: isCoveredByAdvance ? 'Advance Credit' : undefined,
+      ownerName: data.ownerName || f.ownerName,
+      phone: data.phone || f.phone,
     };
   };
 
