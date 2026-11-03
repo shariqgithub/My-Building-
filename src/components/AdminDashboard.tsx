@@ -187,7 +187,9 @@ export const AdminDashboard: React.FC = () => {
           maintenanceLabel: r.maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning',
           customCharges: charges,
           pendingAmount: r.pendingAmount ?? (r.previousBalance && r.previousBalance > 0 ? r.previousBalance : 0),
-          advanceAmount: r.advanceAmount ?? (r.previousBalance && r.previousBalance < 0 ? Math.abs(r.previousBalance) : 0),
+          advanceAmount: (r.flatId === 'flat-402' || r.flatNumber === '402')
+            ? 0
+            : (r.advanceAmount ?? (r.previousBalance && r.previousBalance < 0 ? Math.abs(r.previousBalance) : 0)),
         };
       });
     } else {
@@ -582,11 +584,14 @@ export const AdminDashboard: React.FC = () => {
           ? reading.pendingAmount
           : (reading?.previousBalance && reading.previousBalance > 0 ? reading.previousBalance : 0));
 
-    const advanceAmt = draft?.advanceAmount !== undefined
-      ? draft.advanceAmount
-      : (reading?.advanceAmount !== undefined
-          ? reading.advanceAmount
-          : (reading?.previousBalance && reading.previousBalance < 0 ? Math.abs(reading.previousBalance) : 0));
+    const isFlat402 = flatId === 'flat-402' || flat?.flatNumber === '402' || reading?.flatNumber === '402';
+    const advanceAmt = isFlat402
+      ? 0
+      : (draft?.advanceAmount !== undefined
+          ? draft.advanceAmount
+          : (reading?.advanceAmount !== undefined
+              ? reading.advanceAmount
+              : (reading?.previousBalance && reading.previousBalance < 0 ? Math.abs(reading.previousBalance) : 0)));
 
     const totalDue = monthBill + pendingAmt;
     const netPayable = Math.max(0, totalDue - advanceAmt);

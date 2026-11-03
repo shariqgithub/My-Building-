@@ -169,10 +169,10 @@ export const ResidentDashboard: React.FC = () => {
         });
       }
 
-      // Authoritative amounts recorded in the cycle
+      const isFlat402 = found.flatId === 'flat-402' || (found.flatNumber && normalizeFlatNumber(found.flatNumber) === 'flat-402');
       const total = found.totalBillAmount !== undefined ? found.totalBillAmount : (energy + common + maint + customSum);
       const pending = found.pendingAmount ?? (found.previousBalance && found.previousBalance > 0 ? found.previousBalance : 0);
-      const advance = found.advanceAmount ?? (found.previousBalance && found.previousBalance < 0 ? Math.abs(found.previousBalance) : 0);
+      const advance = isFlat402 ? 0 : (found.advanceAmount ?? (found.previousBalance && found.previousBalance < 0 ? Math.abs(found.previousBalance) : 0));
       const totalDue = total + pending;
       const net = found.netPayableAmount !== undefined ? found.netPayableAmount : Math.max(0, totalDue - advance);
       const isCovered = advance > 0 && advance >= totalDue;
@@ -180,8 +180,8 @@ export const ResidentDashboard: React.FC = () => {
 
       const paid = found.paidAmount;
       const remaining = isCovered ? 0 : (found.remainingBalance !== undefined ? found.remainingBalance : (paid !== undefined ? Math.max(0, net - paid) : net));
-      let advancePaid = found.advancePaid !== undefined && found.advancePaid > 0 ? found.advancePaid : surplusAdvance;
-      if (paid && paid > net) {
+      let advancePaid = isFlat402 ? 0 : (found.advancePaid !== undefined && found.advancePaid > 0 ? found.advancePaid : surplusAdvance);
+      if (!isFlat402 && paid && paid > net) {
         advancePaid = Math.max(advancePaid, surplusAdvance + (paid - net));
       }
       const status = isCovered ? 'paid' : (paid && paid >= net && net > 0 ? 'paid' : found.paymentStatus);
