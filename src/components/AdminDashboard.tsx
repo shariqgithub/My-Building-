@@ -595,7 +595,7 @@ export const AdminDashboard: React.FC = () => {
     if (e) e.preventDefault();
     const trimmed = newColumnName.trim();
     if (!trimmed) {
-      setColumnErrorMsg('Please enter a column or fee name (e.g. Building Charge, Lift Maintenance)');
+      setColumnErrorMsg('Please enter a column or fee name (e.g. Submersible Repair, Building Charge)');
       return;
     }
 
@@ -606,13 +606,16 @@ export const AdminDashboard: React.FC = () => {
       activeCycle.id
     );
 
+    if (!newCol) return;
+
     // Update draftReadings locally so the table inputs display the new values right away
     if (applyColumnToAll) {
       setDraftReadings((prev) => {
         const updated = { ...prev };
-        flats.forEach((f) => {
+        activeCycleFlats.forEach((f) => {
           const currentFlatCharges = { ...(updated[f.id]?.customCharges || {}) };
           currentFlatCharges[newCol.id] = amt;
+          currentFlatCharges[newCol.name] = amt;
           updated[f.id] = {
             ...(updated[f.id] || {
               current: f.baselineReading + 100,
@@ -1205,11 +1208,11 @@ export const AdminDashboard: React.FC = () => {
                   type="button"
                   id="add-column-top-btn"
                   onClick={handleOpenAddColumnModal}
-                  className="py-1.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
-                  title="Add a new fee column (e.g. Building Charge, Lift Maintenance)"
+                  className="py-1.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                  title="Add a new fee column (e.g. Submersible Repair, Building Charge)"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>Add Col</span>
+                  <span>+ Add Column</span>
                 </button>
 
                 <button
@@ -1318,12 +1321,25 @@ export const AdminDashboard: React.FC = () => {
                 </div>
               </div>
 
-              {/* Added Dynamic Fee Columns (e.g. Building Charge) */}
-              {activeCustomColumns.length > 0 && (
-                <div className="mt-3 pt-2.5 border-t border-slate-200/80">
-                  <span className="text-[11px] font-bold text-slate-700 block mb-1.5">
-                    Added Dynamic Fee Columns:
+              {/* Added Dynamic Fee Columns (e.g. Submersible Repair, Building Charge) */}
+              <div className="mt-3 pt-2.5 border-t border-slate-200/80">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <span className="text-[11px] font-bold text-slate-800 flex items-center gap-1.5">
+                    <PlusCircle className="w-3.5 h-3.5 text-indigo-600" />
+                    Extra Fee Columns (e.g. Submersible Repair, Building Maintenance):
                   </span>
+                  <button
+                    type="button"
+                    onClick={handleOpenAddColumnModal}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1 rounded-xl transition-colors cursor-pointer shadow-xs"
+                    title="Add a custom column like Submersible Repair to split amongst flat owners"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ Add New Fee Column</span>
+                  </button>
+                </div>
+
+                {activeCustomColumns.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
                     {activeCustomColumns.map((col) => (
                       <div
@@ -1342,33 +1358,48 @@ export const AdminDashboard: React.FC = () => {
                         </button>
                       </div>
                     ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-500 bg-white/70 px-2.5 py-1.5 rounded-lg border border-slate-200/60 inline-flex items-center gap-1.5">
+                    <span>Need to charge for <strong>Submersible Repair</strong>, lift maintenance, or building expenses?</span>
                     <button
                       type="button"
                       onClick={handleOpenAddColumnModal}
-                      className="inline-flex items-center gap-1 text-xs font-bold text-indigo-700 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-dashed border-indigo-300 px-2.5 py-1 rounded-xl transition-colors cursor-pointer"
+                      className="text-indigo-700 font-bold underline hover:text-indigo-900 cursor-pointer"
                     >
-                      <Plus className="w-3 h-3" /> Add Another Column
+                      Click here to add Submersible Repair column
                     </button>
-                  </div>
-                </div>
-              )}
+                  </p>
+                )}
+              </div>
             </div>
 
             {readingViewMode === 'cards' ? (
               /* CARDS VIEW: Mobile-Optimized 100% Full-Width Flat Cards */
               <div className="p-3 sm:p-4 bg-slate-100/70">
-                <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between text-xs text-amber-900">
+                <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-xl flex items-center justify-between flex-wrap gap-2 text-xs text-amber-900">
                   <div className="flex items-center gap-1.5 font-medium">
                     <Smartphone className="w-4 h-4 text-amber-600 shrink-0" />
                     <span><strong>Cards View Active:</strong> All 15 flats and fields are 100% visible on mobile without horizontal scrolling.</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setReadingViewMode('table')}
-                    className="font-bold underline text-amber-950 shrink-0 ml-2 cursor-pointer"
-                  >
-                    Switch to Table
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleOpenAddColumnModal}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors cursor-pointer shadow-xs"
+                      title="Add fee column like Submersible Repair"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>+ Add Column</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReadingViewMode('table')}
+                      className="font-bold underline text-amber-950 shrink-0 cursor-pointer"
+                    >
+                      Switch to Table
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
@@ -2231,6 +2262,18 @@ export const AdminDashboard: React.FC = () => {
               >
                 <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
                 <span>Reset All Months</span>
+              </button>
+
+              {/* Add Custom Fee Column Shortcut (e.g. Submersible Repair) */}
+              <button
+                type="button"
+                id="payments-add-fee-column-btn"
+                onClick={() => setIsAddColumnModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 border border-indigo-200 rounded-lg text-xs font-bold transition-all shadow-2xs cursor-pointer"
+                title="Add a new fee column (e.g. Submersible Repair, Special Maintenance)"
+              >
+                <Plus className="w-3.5 h-3.5 text-indigo-600 stroke-[2.5]" />
+                <span>+ Add Fee Column</span>
               </button>
 
               {/* View Switcher: Table View (Spreadsheet with Pending/Advance) vs Cards View */}
@@ -4350,7 +4393,7 @@ export const AdminDashboard: React.FC = () => {
                     setNewColumnName(e.target.value);
                     if (columnErrorMsg) setColumnErrorMsg('');
                   }}
-                  placeholder="e.g. Building Charge, Lift Maintenance, Generator"
+                  placeholder="e.g. Submersible Repair, Building Charge, Lift Maintenance"
                   className="w-full px-3 py-2 text-sm bg-slate-50 focus:bg-white border border-slate-300 focus:border-indigo-500 rounded-xl focus:ring-2 focus:ring-indigo-500/20 font-semibold"
                   autoFocus
                 />
@@ -4359,6 +4402,7 @@ export const AdminDashboard: React.FC = () => {
                 <div className="mt-2 flex flex-wrap gap-1.5 items-center">
                   <span className="text-[10px] text-slate-400 font-semibold">Presets:</span>
                   {[
+                    'Submersible Repair',
                     'Building Charge',
                     'Lift Maintenance',
                     'Generator Backup',

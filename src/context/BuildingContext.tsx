@@ -80,7 +80,7 @@ interface BuildingContextType {
     column: { name: string; defaultAmount: number },
     applyToAllFlats?: boolean,
     cycleId?: string
-  ) => void;
+  ) => CustomFeeColumn;
   removeCustomFeeColumn: (columnId: string, cycleId?: string) => void;
   updateCustomFeeColumn: (
     columnId: string,
@@ -1585,9 +1585,8 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     column: { name: string; defaultAmount: number },
     applyToAllFlats: boolean = true,
     cycleId?: string
-  ) => {
-    const colName = column.name.trim();
-    if (!colName) return;
+  ): CustomFeeColumn => {
+    const colName = column.name.trim() || 'Extra Charge';
     const colId = `col_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const newCol: CustomFeeColumn = {
       id: colId,
@@ -1616,6 +1615,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const currentCharges = { ...(r.customCharges || {}) };
           if (applyToAllFlats) {
             currentCharges[colId] = newCol.defaultAmount;
+            currentCharges[newCol.name] = newCol.defaultAmount;
           }
           return {
             ...r,
@@ -1643,6 +1643,8 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       `Added "${newCol.name}" (₹${newCol.defaultAmount}/flat) to the billing table. Receipts and totals auto-updated!`,
       'system'
     );
+
+    return newCol;
   };
 
   const removeCustomFeeColumn = (columnId: string, cycleId?: string) => {
