@@ -245,20 +245,34 @@ export const AdminDashboard: React.FC = () => {
   const [paymentAdvanceInput, setPaymentAdvanceInput] = useState<string>('0');
   const [qrUploadError, setQrUploadError] = useState<string>('');
 
-  const openPaymentModal = (reading: FlatReadingEntry) => {
-    setMarkingFlatId(reading.flatId);
-    const curPending = reading.pendingAmount ?? (reading.previousBalance && reading.previousBalance > 0 ? reading.previousBalance : 0);
-    const curAdvance = reading.advanceAmount ?? (reading.previousBalance && reading.previousBalance < 0 ? Math.abs(reading.previousBalance) : 0);
+  const openPaymentModal = (target: string | FlatReadingEntry) => {
+    const flatId = typeof target === 'string' ? target : target.flatId;
+    setMarkingFlatId(flatId);
+    const reading = activeCycle?.readings.find((r) => r.flatId === flatId);
+    const draft = draftReadings[flatId];
+    const curPending = draft?.pendingAmount ?? reading?.pendingAmount ?? (reading?.previousBalance && reading.previousBalance > 0 ? reading.previousBalance : 0);
+    const curAdvance = draft?.advanceAmount ?? reading?.advanceAmount ?? (reading?.previousBalance && reading.previousBalance < 0 ? Math.abs(reading.previousBalance) : 0);
     setPaymentPendingInput(curPending.toString());
     setPaymentAdvanceInput(curAdvance.toString());
 
-    const net = reading.netPayableAmount ?? Math.max(0, reading.totalBillAmount + curPending - curAdvance);
-    const defaultAmt = reading.paidAmount !== undefined
-      ? reading.paidAmount
-      : net;
+    let customSum = 0;
+    const flatCharges = draft?.customCharges || reading?.customCharges || {};
+    (activeCycle?.customColumns || []).forEach((col) => {
+      const val = flatCharges[col.id] ?? flatCharges[col.name] ?? col.defaultAmount ?? 0;
+      customSum += Number(val) || 0;
+    });
+
+    const isShop = (reading?.flatNumber || flatId || '').toLowerCase().includes('shop');
+    const common = draft?.commonMeterCharges ?? reading?.commonMeterCharges ?? (isShop ? 0 : 160);
+    const maint = draft?.maintenanceCharges ?? reading?.maintenanceCharges ?? (isShop ? 0 : 110);
+    const energy = reading?.calculatedAmount ?? 0;
+    const mBill = energy + common + maint + customSum;
+    const net = Math.max(0, mBill + curPending - curAdvance);
+
+    const defaultAmt = reading?.paidAmount !== undefined ? reading.paidAmount : net;
     setPaymentAmountInput(defaultAmt.toString());
-    setPaymentMethod((reading.paymentMethod as any) || 'UPI');
-    setPaymentUtr(reading.upiReference || '');
+    setPaymentMethod((reading?.paymentMethod as any) || 'UPI');
+    setPaymentUtr(reading?.upiReference || '');
   };
 
   const handleQrFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -519,50 +533,222 @@ export const AdminDashboard: React.FC = () => {
     }),
   });
 
+  // Unified flat row calculation shared identically across Meter Reading Entry & Payments Tracker
+  const getUnifiedFlatRow = (flatId: string) => {
+    const flat = activeCycleFlats.find((f) => f.id === flatId) || flats.find((f) => f.id === flatId);
+    const reading = activeCycle.readings.find((r) => r.flatId === flatId);
+    const draft = draftReadings[flatId];
+
+    const prevReading = draft?.previous ?? reading?.previousReading ?? flat?.baselineReading ?? 0;
+    const currReading = draft?.current ?? reading?.currentReading ?? prevReading;
+    const units = Math.max(0, currReading - prevReading);
+    const isInvalidReading = currReading < prevReading;
+
+    const rate = flat?.customRatePerUnit !== undefined && flat.customRatePerUnit > 0
+      ? flat.customRatePerUnit
+      : previewCalculation.effectiveRatePerUnit;
+    const energyAmt = Math.round(units * rate);
+
+    const isShop = (flat?.flatNumber || reading?.flatNumber || '').toLowerCase().includes('shop') || (flatId || '').toLowerCase().includes('shop');
+
+    const commonAmt = draft?.commonMeterCharges !== undefined
+      ? draft.commonMeterCharges
+      : (reading?.commonMeterCharges !== undefined
+          ? reading.commonMeterCharges
+          : (isShop ? 0 : (settings.defaultCommonMeterCharges ?? 160)));
+
+    const maintAmt = draft?.maintenanceCharges !== undefined
+      ? draft.maintenanceCharges
+      : (reading?.maintenanceCharges !== undefined
+          ? reading.maintenanceCharges
+          : (isShop ? 0 : (settings.defaultMaintenanceCharges ?? 110)));
+
+    let customChargesSum = 0;
+    const flatCharges = draft?.customCharges || reading?.customCharges || {};
+    const flatCustomValues: Record<string, number> = {};
+    activeCustomColumns.forEach((col) => {
+      const val = flatCharges[col.id] ?? flatCharges[col.name] ?? col.defaultAmount ?? 0;
+      flatCustomValues[col.id] = Number(val) || 0;
+      customChargesSum += Number(val) || 0;
+    });
+
+    // Month Bill (Energy + Common + Maintenance + Dynamic Custom Columns)
+    const monthBill = energyAmt + commonAmt + maintAmt + customChargesSum;
+
+    // Balance Adjustments (Pending dues from previous month & advance credits)
+    const pendingAmt = draft?.pendingAmount !== undefined
+      ? draft.pendingAmount
+      : (reading?.pendingAmount !== undefined
+          ? reading.pendingAmount
+          : (reading?.previousBalance && reading.previousBalance > 0 ? reading.previousBalance : 0));
+
+    const advanceAmt = draft?.advanceAmount !== undefined
+      ? draft.advanceAmount
+      : (reading?.advanceAmount !== undefined
+          ? reading.advanceAmount
+          : (reading?.previousBalance && reading.previousBalance < 0 ? Math.abs(reading.previousBalance) : 0));
+
+    const totalDue = monthBill + pendingAmt;
+    const netPayable = Math.max(0, totalDue - advanceAmt);
+    const isFullyCoveredByAdvance = advanceAmt > 0 && advanceAmt >= totalDue;
+    const surplusAdvance = Math.max(0, advanceAmt - totalDue);
+
+    const paidAmt = reading?.paidAmount;
+    const remainingAmt = isFullyCoveredByAdvance
+      ? 0
+      : (paidAmt !== undefined ? Math.max(0, netPayable - paidAmt) : netPayable);
+
+    let status: 'paid' | 'unpaid' | 'pending' | 'partially_paid' = 'unpaid';
+    if (isFullyCoveredByAdvance) {
+      status = 'paid';
+    } else if (reading?.paymentStatus === 'pending') {
+      status = 'pending';
+    } else if (paidAmt !== undefined && paidAmt > 0) {
+      status = paidAmt >= netPayable ? 'paid' : 'partially_paid';
+    } else if (reading?.paymentStatus) {
+      status = reading.paymentStatus;
+    }
+
+    const residentName = reading?.ownerName || flat?.ownerName || (flat?.flatNumber ? `Flat ${flat.flatNumber}` : `Flat ${flatId}`);
+    const residentPhone = reading?.phone || flat?.phone || '';
+    const flatDisplay = flat?.flatNumber || reading?.flatNumber || flatId;
+
+    return {
+      flat,
+      reading,
+      flatId,
+      flatDisplay,
+      residentName,
+      residentPhone,
+      prevReading,
+      currReading,
+      units,
+      rate,
+      energyAmt,
+      commonAmt,
+      maintAmt,
+      flatCustomValues,
+      customChargesSum,
+      monthBill,
+      pendingAmt,
+      advanceAmt,
+      totalDue,
+      netPayable,
+      isFullyCoveredByAdvance,
+      surplusAdvance,
+      paidAmt,
+      remainingAmt,
+      status,
+      isInvalidReading,
+    };
+  };
+
+  const getSyncedReadingEntry = (flatId: string): FlatReadingEntry => {
+    const row = getUnifiedFlatRow(flatId);
+    return {
+      flatId: row.flatId,
+      flatNumber: row.flatDisplay,
+      ownerName: row.residentName,
+      phone: row.residentPhone,
+      previousReading: row.prevReading,
+      currentReading: row.currReading,
+      unitsConsumed: row.units,
+      ratePerUnit: row.rate,
+      calculatedAmount: row.energyAmt,
+      commonShareAmount: row.commonAmt,
+      maintenanceCharges: row.maintAmt,
+      maintenanceLabel: draftReadings[row.flatId]?.maintenanceLabel || maintenanceLabel || 'Cleaning',
+      commonMeterCharges: row.commonAmt,
+      commonMeterLabel: draftReadings[row.flatId]?.commonMeterLabel || commonMeterLabel || 'Water & stairs light',
+      customCharges: row.flatCustomValues,
+      totalBillAmount: row.monthBill,
+      pendingAmount: row.pendingAmt,
+      advanceAmount: row.advanceAmt,
+      isBalanceManual: true,
+      previousBalance: row.pendingAmt - row.advanceAmt,
+      netPayableAmount: row.netPayable,
+      paymentStatus: row.status,
+      paidAmount: row.paidAmt,
+      remainingBalance: row.remainingAmt,
+      advancePaid: row.surplusAdvance,
+      paidDate: row.reading?.paidDate,
+      paymentMethod: row.reading?.paymentMethod,
+      upiReference: row.reading?.upiReference,
+      adminNotes: row.reading?.adminNotes,
+    };
+  };
+
+  const handlePrevReadingChange = (flatId: string, val: number) => {
+    const cleanVal = isNaN(val) ? 0 : val;
+    setDraftReadings((prevMap) => ({
+      ...prevMap,
+      [flatId]: {
+        ...(prevMap[flatId] || { current: activeCycle.readings.find((r) => r.flatId === flatId)?.currentReading ?? 0 }),
+        previous: cleanVal,
+      },
+    }));
+  };
+
+  const handleCurrReadingChange = (flatId: string, val: number) => {
+    const cleanVal = isNaN(val) ? 0 : val;
+    setDraftReadings((prevMap) => ({
+      ...prevMap,
+      [flatId]: {
+        ...(prevMap[flatId] || { previous: activeCycle.readings.find((r) => r.flatId === flatId)?.previousReading ?? 0 }),
+        current: cleanVal,
+      },
+    }));
+  };
+
+  const handleCommonMeterChange = (flatId: string, val: number) => {
+    const cleanVal = isNaN(val) ? 0 : val;
+    setDraftReadings((prevMap) => ({
+      ...prevMap,
+      [flatId]: {
+        ...prevMap[flatId],
+        commonMeterCharges: cleanVal,
+      },
+    }));
+  };
+
+  const handleMaintenanceChange = (flatId: string, val: number) => {
+    const cleanVal = isNaN(val) ? 0 : val;
+    setDraftReadings((prevMap) => ({
+      ...prevMap,
+      [flatId]: {
+        ...prevMap[flatId],
+        maintenanceCharges: cleanVal,
+      },
+    }));
+  };
+
+  const handlePendingChange = (flatId: string, val: number, currentAdvance: number) => {
+    const cleanVal = Math.max(0, isNaN(val) ? 0 : val);
+    setDraftReadings((prevMap) => ({
+      ...prevMap,
+      [flatId]: {
+        ...prevMap[flatId],
+        pendingAmount: cleanVal,
+      },
+    }));
+    updateFlatBalances(activeCycle.id, flatId, cleanVal, currentAdvance, true);
+  };
+
+  const handleAdvanceChange = (flatId: string, currentPending: number, val: number) => {
+    const cleanVal = Math.max(0, isNaN(val) ? 0 : val);
+    setDraftReadings((prevMap) => ({
+      ...prevMap,
+      [flatId]: {
+        ...prevMap[flatId],
+        advanceAmount: cleanVal,
+      },
+    }));
+    updateFlatBalances(activeCycle.id, flatId, currentPending, cleanVal, true);
+  };
+
   // Handle saving readings into the active cycle or new cycle
   const handleSaveReadings = () => {
-    const updatedEntries: FlatReadingEntry[] = previewCalculation.flatReadings.map((pr) => {
-      const existing = activeCycle.readings.find((r) => r.flatId === pr.flatId);
-      const isShop = (pr.flatNumber || '').toLowerCase().includes('shop') || (pr.flatId || '').toLowerCase().includes('shop');
-      const commonAmt = draftReadings[pr.flatId]?.commonMeterCharges !== undefined
-        ? draftReadings[pr.flatId]?.commonMeterCharges
-        : (pr.commonMeterCharges !== undefined ? pr.commonMeterCharges : (isShop ? 0 : (settings.defaultCommonMeterCharges ?? 160)));
-      const maintAmt = draftReadings[pr.flatId]?.maintenanceCharges !== undefined
-        ? draftReadings[pr.flatId]?.maintenanceCharges
-        : (pr.maintenanceCharges !== undefined ? pr.maintenanceCharges : (isShop ? 0 : (settings.defaultMaintenanceCharges ?? 110)));
-      const pendingAmt = draftReadings[pr.flatId]?.pendingAmount ?? pr.pendingAmount ?? 0;
-      const advanceAmt = draftReadings[pr.flatId]?.advanceAmount ?? pr.advanceAmount ?? 0;
-      const totalDue = pr.totalBillAmount + pendingAmt;
-      const netPayable = Math.max(0, totalDue - advanceAmt);
-      const isCovered = advanceAmt > 0 && advanceAmt >= totalDue;
-      const surplusAdvance = Math.max(0, advanceAmt - totalDue);
-
-      const existingPaid = existing?.paidAmount;
-      const status = isCovered ? 'paid' : (existing ? existing.paymentStatus : 'unpaid');
-      const advancePaid = surplusAdvance + (existingPaid && existingPaid > netPayable ? (existingPaid - netPayable) : (isCovered && existingPaid ? existingPaid : 0));
-
-      return {
-        ...pr,
-        commonMeterCharges: commonAmt,
-        maintenanceCharges: maintAmt,
-        commonMeterLabel: draftReadings[pr.flatId]?.commonMeterLabel || commonMeterLabel,
-        maintenanceLabel: draftReadings[pr.flatId]?.maintenanceLabel || maintenanceLabel,
-        customCharges: draftReadings[pr.flatId]?.customCharges || pr.customCharges || {},
-        pendingAmount: pendingAmt,
-        advanceAmount: advanceAmt,
-        isBalanceManual: true,
-        previousBalance: pendingAmt - advanceAmt,
-        netPayableAmount: netPayable,
-        paymentStatus: status,
-        paidAmount: existingPaid,
-        remainingBalance: isCovered ? 0 : (existingPaid !== undefined ? Math.max(0, netPayable - existingPaid) : netPayable),
-        advancePaid: advancePaid,
-        paidDate: isCovered && !existing?.paidDate ? new Date().toISOString().split('T')[0] : existing?.paidDate,
-        paymentMethod: isCovered && !existing?.paymentMethod ? 'Advance Credit' : existing?.paymentMethod,
-        upiReference: existing?.upiReference,
-        adminNotes: existing?.adminNotes,
-      };
-    });
+    const updatedEntries: FlatReadingEntry[] = activeCycleFlats.map((f) => getSyncedReadingEntry(f.id));
 
     updateCycleReadings(
       activeCycle.id,
@@ -686,34 +872,32 @@ export const AdminDashboard: React.FC = () => {
     updateCustomFeeColumn(columnId, { name: newName }, activeCycle.id);
   };
 
-  // Quick WhatsApp bill sender with user's exact required format
-  const sendWhatsAppBill = (reading: FlatReadingEntry) => {
-    const flat = (activeCycle.flatsSnapshot && activeCycle.flatsSnapshot.length > 0
-      ? activeCycle.flatsSnapshot.find((f) => f.id === reading.flatId)
-      : undefined) || flats.find((f) => f.id === reading.flatId);
-    const ownerName = reading.ownerName || flat?.ownerName || `Flat ${reading.flatNumber} Resident`;
-    const phone = (reading.phone || flat?.phone || '').replace(/\D/g, '');
+  // Quick WhatsApp bill sender with user's exact required format using unified row data
+  const sendWhatsAppBill = (target: string | FlatReadingEntry) => {
+    const flatId = typeof target === 'string' ? target : target.flatId;
+    const row = getUnifiedFlatRow(flatId);
+    const phone = (row.residentPhone || '').replace(/\D/g, '');
 
     const text = generateWhatsAppBillMessage({
       month: activeCycle.month,
       dueDate: activeCycle.dueDate || cycleDueDate,
-      flatNumber: reading.flatNumber,
-      ownerName: ownerName,
-      previousReading: reading.previousReading,
-      currentReading: reading.currentReading,
-      unitsConsumed: reading.unitsConsumed,
-      calculatedAmount: reading.calculatedAmount,
-      commonMeterCharges: reading.commonMeterCharges ?? draftReadings[reading.flatId]?.commonMeterCharges ?? 160,
-      commonMeterLabel: reading.commonMeterLabel || draftReadings[reading.flatId]?.commonMeterLabel || commonMeterLabel || 'Common meter',
-      maintenanceCharges: reading.maintenanceCharges ?? draftReadings[reading.flatId]?.maintenanceCharges ?? 110,
-      maintenanceLabel: reading.maintenanceLabel || draftReadings[reading.flatId]?.maintenanceLabel || maintenanceLabel || 'Cleaning',
+      flatNumber: row.flatDisplay,
+      ownerName: row.residentName,
+      previousReading: row.prevReading,
+      currentReading: row.currReading,
+      unitsConsumed: row.units,
+      calculatedAmount: row.energyAmt,
+      commonMeterCharges: row.commonAmt,
+      commonMeterLabel: commonMeterLabel || 'Common meter',
+      maintenanceCharges: row.maintAmt,
+      maintenanceLabel: maintenanceLabel || 'Cleaning',
       customColumns: activeCustomColumns,
-      customCharges: reading.customCharges || draftReadings[reading.flatId]?.customCharges || {},
-      totalBillAmount: reading.totalBillAmount,
-      pendingAmount: reading.pendingAmount ?? draftReadings[reading.flatId]?.pendingAmount,
-      advanceAmount: reading.advanceAmount ?? draftReadings[reading.flatId]?.advanceAmount,
-      previousBalance: reading.previousBalance,
-      netPayableAmount: reading.netPayableAmount,
+      customCharges: row.flatCustomValues,
+      totalBillAmount: row.monthBill,
+      pendingAmount: row.pendingAmt,
+      advanceAmount: row.advanceAmt,
+      previousBalance: row.pendingAmt - row.advanceAmt,
+      netPayableAmount: row.netPayable,
     });
     const url = phone.length === 10
       ? `https://wa.me/91${phone}?text=${encodeURIComponent(text)}`
@@ -757,15 +941,23 @@ export const AdminDashboard: React.FC = () => {
     setTimeout(() => setSaveSuccessMsg(''), 5000);
   };
 
-  const filteredReadings = activeCycle.readings.filter((r) => {
+  const paidCount = activeCycleFlats.filter((f) => getUnifiedFlatRow(f.id).status === 'paid').length;
+  const unpaidCount = activeCycleFlats.filter((f) => getUnifiedFlatRow(f.id).status === 'unpaid').length;
+  const pendingCount = activeCycleFlats.filter((f) => getUnifiedFlatRow(f.id).status === 'pending').length;
+  const partiallyPaidCount = activeCycleFlats.filter((f) => getUnifiedFlatRow(f.id).status === 'partially_paid').length;
+
+  const filteredFlats = activeCycleFlats.filter((f) => {
     if (filterPayment === 'all') return true;
-    return r.paymentStatus === filterPayment;
+    const row = getUnifiedFlatRow(f.id);
+    return row.status === filterPayment;
   });
 
-  const paidCount = activeCycle.readings.filter((r) => r.paymentStatus === 'paid').length;
-  const unpaidCount = activeCycle.readings.filter((r) => r.paymentStatus === 'unpaid').length;
-  const pendingCount = activeCycle.readings.filter((r) => r.paymentStatus === 'pending').length;
-  const partiallyPaidCount = activeCycle.readings.filter((r) => r.paymentStatus === 'partially_paid').length;
+  const liveTotalBilled = activeCycleFlats.reduce((sum, f) => sum + getUnifiedFlatRow(f.id).monthBill, 0);
+  const liveTotalCollected = activeCycleFlats.reduce((sum, f) => {
+    const row = getUnifiedFlatRow(f.id);
+    if (row.isFullyCoveredByAdvance) return sum + row.totalDue;
+    return sum + (row.paidAmt || 0);
+  }, 0);
 
   return (
     <div className="space-y-4 pb-12">
@@ -815,7 +1007,7 @@ export const AdminDashboard: React.FC = () => {
         <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
           <span className="text-[11px] text-slate-500 font-medium block">Total Billed ({activeCycle.month})</span>
           <span className="text-xl font-extrabold text-slate-900 block mt-0.5">
-            ₹{activeCycle.totalBilledAmount.toLocaleString('en-IN')}
+            ₹{(liveTotalBilled || activeCycle.totalBilledAmount).toLocaleString('en-IN')}
           </span>
           <span className="text-[10px] text-slate-400">Main bill: ₹{activeCycle.mainMeter.mainMeterBillAmount}</span>
         </div>
@@ -823,7 +1015,7 @@ export const AdminDashboard: React.FC = () => {
         <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
           <span className="text-[11px] text-emerald-600 font-medium block">Total Collected</span>
           <span className="text-xl font-extrabold text-emerald-600 block mt-0.5">
-            ₹{activeCycle.totalCollectedAmount.toLocaleString('en-IN')}
+            ₹{(liveTotalCollected || activeCycle.totalCollectedAmount).toLocaleString('en-IN')}
           </span>
           <span className="text-[10px] text-slate-400">
             {paidCount} of 15 Flats Paid ({partiallyPaidCount} partial)
@@ -1404,34 +1596,7 @@ export const AdminDashboard: React.FC = () => {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
                   {activeCycleFlats.map((flat) => {
-                    const prev = draftReadings[flat.id]?.previous ?? flat.baselineReading;
-                    const curr = draftReadings[flat.id]?.current ?? prev;
-                    const units = Math.max(0, curr - prev);
-                    const isInvalid = curr < prev;
-
-                    const rate = flat.customRatePerUnit !== undefined && flat.customRatePerUnit > 0
-                      ? flat.customRatePerUnit
-                      : previewCalculation.effectiveRatePerUnit;
-                    const energyAmt = Math.round(units * rate);
-                    const isShopFlat = (flat.flatNumber || '').toLowerCase().includes('shop') || (flat.id || '').toLowerCase().includes('shop');
-                    const commonAmt = draftReadings[flat.id]?.commonMeterCharges !== undefined
-                      ? draftReadings[flat.id]?.commonMeterCharges
-                      : (isShopFlat ? 0 : (settings.defaultCommonMeterCharges ?? 160));
-                    const maintAmt = draftReadings[flat.id]?.maintenanceCharges !== undefined
-                      ? draftReadings[flat.id]?.maintenanceCharges
-                      : (isShopFlat ? 0 : (settings.defaultMaintenanceCharges ?? 110));
-
-                    let customChargesSum = 0;
-                    activeCustomColumns.forEach((col) => {
-                      const flatCharges = draftReadings[flat.id]?.customCharges;
-                      const val = flatCharges?.[col.id] ?? flatCharges?.[col.name] ?? col.defaultAmount ?? 0;
-                      customChargesSum += Number(val) || 0;
-                    });
-
-                    const totalAmt = energyAmt + commonAmt + maintAmt + customChargesSum;
-                    const pendingAmt = draftReadings[flat.id]?.pendingAmount ?? 0;
-                    const advanceAmt = draftReadings[flat.id]?.advanceAmount ?? 0;
-                    const netBill = Math.max(0, totalAmt + pendingAmt - advanceAmt);
+                    const row = getUnifiedFlatRow(flat.id);
 
                     return (
                       <div
@@ -1442,16 +1607,16 @@ export const AdminDashboard: React.FC = () => {
                         <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
                           <div className="flex items-center gap-2">
                             <span className="inline-block px-2.5 py-1 rounded-lg bg-slate-900 text-white font-mono text-xs font-bold shadow-2xs">
-                              {flat.flatNumber.toLowerCase().includes('shop') || flat.flatNumber.toLowerCase().startsWith('flat')
-                                ? flat.flatNumber
-                                : `Flat ${flat.flatNumber}`}
+                              {row.flatDisplay.toLowerCase().includes('shop') || row.flatDisplay.toLowerCase().startsWith('flat')
+                                ? row.flatDisplay
+                                : `Flat ${row.flatDisplay}`}
                             </span>
                             <div>
                               <div className="text-xs font-bold text-slate-900 leading-tight">
-                                {flat.ownerName}
+                                {row.residentName}
                               </div>
                               <div className="text-[10px] font-mono text-slate-500">
-                                +91 {flat.phone}
+                                {row.residentPhone ? `+91 ${row.residentPhone}` : 'No phone'}
                               </div>
                             </div>
                           </div>
@@ -1460,17 +1625,14 @@ export const AdminDashboard: React.FC = () => {
                               type="button"
                               onClick={() => setEditingFlat(flat)}
                               className="px-2 py-1 text-[11px] font-semibold text-slate-600 hover:text-amber-800 bg-slate-100 hover:bg-amber-50 rounded-lg border border-slate-200 transition-colors flex items-center gap-1 cursor-pointer"
-                              title={`Edit Flat ${flat.flatNumber} details`}
+                              title={`Edit Flat ${row.flatDisplay} details`}
                             >
                               <Edit3 className="w-3 h-3 text-amber-600" />
                               <span>Edit</span>
                             </button>
                             <button
                               type="button"
-                              onClick={() => {
-                                const entry = previewCalculation.flatReadings.find((r) => r.flatId === flat.id);
-                                if (entry) sendWhatsAppBill(entry);
-                              }}
+                              onClick={() => sendWhatsAppBill(row.flatId)}
                               className="p-1.5 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
                               title="Send Bill via WhatsApp"
                             >
@@ -1488,20 +1650,10 @@ export const AdminDashboard: React.FC = () => {
                               </label>
                               <input
                                 type="number"
-                                value={prev === 0 ? '' : prev}
+                                value={row.prevReading === 0 ? '' : row.prevReading}
                                 onFocus={(e) => e.target.select()}
                                 placeholder="0"
-                                onChange={(e) => {
-                                  const val = e.target.value === '' ? 0 : Number(e.target.value);
-                                  setDraftReadings((prevMap) => ({
-                                    ...prevMap,
-                                    [flat.id]: {
-                                      ...prevMap[flat.id],
-                                      previous: val,
-                                      current: curr,
-                                    },
-                                  }));
-                                }}
+                                onChange={(e) => handlePrevReadingChange(flat.id, Number(e.target.value))}
                                 className="w-full px-2.5 py-1.5 text-xs font-mono font-bold rounded-lg border bg-white border-slate-200 text-slate-800 focus:ring-2 focus:ring-amber-500/30 text-right"
                               />
                             </div>
@@ -1511,39 +1663,29 @@ export const AdminDashboard: React.FC = () => {
                               </label>
                               <input
                                 type="number"
-                                value={curr === 0 ? '' : curr}
+                                value={row.currReading === 0 ? '' : row.currReading}
                                 onFocus={(e) => e.target.select()}
                                 placeholder="0"
-                                onChange={(e) => {
-                                  const val = e.target.value === '' ? 0 : Number(e.target.value);
-                                  setDraftReadings((prevMap) => ({
-                                    ...prevMap,
-                                    [flat.id]: {
-                                      ...prevMap[flat.id],
-                                      previous: prev,
-                                      current: val,
-                                    },
-                                  }));
-                                }}
+                                onChange={(e) => handleCurrReadingChange(flat.id, Number(e.target.value))}
                                 className={`w-full px-2.5 py-1.5 text-xs font-mono font-bold rounded-lg border text-right ${
-                                  isInvalid
+                                  row.isInvalidReading
                                     ? 'bg-rose-50 border-rose-400 text-rose-700'
                                     : 'bg-white border-slate-200 text-slate-900 focus:ring-2 focus:ring-amber-500/30'
                                 }`}
                               />
                             </div>
                           </div>
-                          {isInvalid && (
+                          {row.isInvalidReading && (
                             <div className="text-[10px] text-rose-600 font-bold bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
-                              ⚠️ Current reading must be ≥ {prev}
+                              ⚠️ Current reading must be ≥ {row.prevReading}
                             </div>
                           )}
                           <div className="flex items-center justify-between pt-1 border-t border-slate-200/70 text-xs">
                             <span className="text-slate-600">
-                              Units: <strong className="font-mono text-amber-700 font-bold">{units} u</strong> (@ ₹{rate.toFixed(1)}/u)
+                              Units: <strong className="font-mono text-amber-700 font-bold">{row.units} u</strong> (@ ₹{row.rate.toFixed(1)}/u)
                             </span>
                             <span className="font-bold text-slate-800">
-                              Energy: <span className="font-mono font-extrabold text-slate-900">₹{energyAmt.toLocaleString('en-IN')}</span>
+                              Energy: <span className="font-mono font-extrabold text-slate-900">₹{row.energyAmt.toLocaleString('en-IN')}</span>
                             </span>
                           </div>
                         </div>
@@ -1559,19 +1701,10 @@ export const AdminDashboard: React.FC = () => {
                                 <span className="absolute left-2 top-1.5 text-xs text-sky-600 font-bold">₹</span>
                                 <input
                                   type="number"
-                                  value={commonAmt === 0 ? '' : commonAmt}
+                                  value={row.commonAmt === 0 ? '' : row.commonAmt}
                                   onFocus={(e) => e.target.select()}
                                   placeholder="0"
-                                  onChange={(e) => {
-                                    const val = e.target.value === '' ? 0 : Number(e.target.value);
-                                    setDraftReadings((prevMap) => ({
-                                      ...prevMap,
-                                      [flat.id]: {
-                                        ...prevMap[flat.id],
-                                        commonMeterCharges: val,
-                                      },
-                                    }));
-                                  }}
+                                  onChange={(e) => handleCommonMeterChange(flat.id, Number(e.target.value))}
                                   className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-sky-300 bg-white text-slate-800 text-right focus:ring-2 focus:ring-sky-500/30"
                                 />
                               </div>
@@ -1584,19 +1717,10 @@ export const AdminDashboard: React.FC = () => {
                                 <span className="absolute left-2 top-1.5 text-xs text-amber-600 font-bold">₹</span>
                                 <input
                                   type="number"
-                                  value={maintAmt === 0 ? '' : maintAmt}
+                                  value={row.maintAmt === 0 ? '' : row.maintAmt}
                                   onFocus={(e) => e.target.select()}
                                   placeholder="0"
-                                  onChange={(e) => {
-                                    const val = e.target.value === '' ? 0 : Number(e.target.value);
-                                    setDraftReadings((prevMap) => ({
-                                      ...prevMap,
-                                      [flat.id]: {
-                                        ...prevMap[flat.id],
-                                        maintenanceCharges: val,
-                                      },
-                                    }));
-                                  }}
+                                  onChange={(e) => handleMaintenanceChange(flat.id, Number(e.target.value))}
                                   className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-amber-300 bg-white text-slate-800 text-right focus:ring-2 focus:ring-amber-500/30"
                                 />
                               </div>
@@ -1607,8 +1731,7 @@ export const AdminDashboard: React.FC = () => {
                           {activeCustomColumns.length > 0 && (
                             <div className="grid grid-cols-2 gap-2">
                               {activeCustomColumns.map((col) => {
-                                const flatCharges = draftReadings[flat.id]?.customCharges;
-                                const val = flatCharges?.[col.id] ?? flatCharges?.[col.name] ?? col.defaultAmount ?? 0;
+                                const val = row.flatCustomValues[col.id] ?? col.defaultAmount ?? 0;
                                 return (
                                   <div key={col.id} className="bg-indigo-50/60 p-2 rounded-xl border border-indigo-200/70">
                                     <label className="block text-[10px] font-bold text-indigo-950 truncate mb-1">
@@ -1638,6 +1761,12 @@ export const AdminDashboard: React.FC = () => {
                           )}
                         </div>
 
+                        {/* Month Bill Row */}
+                        <div className="p-2 bg-slate-100/80 rounded-xl flex items-center justify-between text-xs border border-slate-200">
+                          <span className="font-semibold text-slate-700">Month Bill (Base + Charges):</span>
+                          <span className="font-mono font-bold text-slate-900">₹{row.monthBill.toLocaleString('en-IN')}/-</span>
+                        </div>
+
                         {/* Balance Adjustments: Pending (+ Dues) & Advance (- Credit) */}
                         <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100">
                           <div className="bg-rose-50/70 p-2 rounded-xl border border-rose-200">
@@ -1650,22 +1779,9 @@ export const AdminDashboard: React.FC = () => {
                               <input
                                 type="number"
                                 min="0"
-                                value={pendingAmt === 0 ? '' : pendingAmt}
+                                value={row.pendingAmt === 0 ? '' : row.pendingAmt}
                                 onFocus={(e) => e.target.select()}
-                                onChange={(e) => {
-                                  const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
-                                  setDraftReadings((prevMap) => ({
-                                    ...prevMap,
-                                    [flat.id]: {
-                                      ...prevMap[flat.id],
-                                      pendingAmount: val,
-                                    },
-                                  }));
-                                }}
-                                onBlur={(e) => {
-                                  const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
-                                  updateFlatBalances(activeCycle.id, flat.id, val, advanceAmt, true);
-                                }}
+                                onChange={(e) => handlePendingChange(flat.id, Number(e.target.value), row.advanceAmt)}
                                 className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-rose-300 bg-white text-rose-900 text-right focus:ring-2 focus:ring-rose-500/30 shadow-2xs"
                                 placeholder="0"
                               />
@@ -1682,22 +1798,9 @@ export const AdminDashboard: React.FC = () => {
                               <input
                                 type="number"
                                 min="0"
-                                value={advanceAmt === 0 ? '' : advanceAmt}
+                                value={row.advanceAmt === 0 ? '' : row.advanceAmt}
                                 onFocus={(e) => e.target.select()}
-                                onChange={(e) => {
-                                  const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
-                                  setDraftReadings((prevMap) => ({
-                                    ...prevMap,
-                                    [flat.id]: {
-                                      ...prevMap[flat.id],
-                                      advanceAmount: val,
-                                    },
-                                  }));
-                                }}
-                                onBlur={(e) => {
-                                  const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
-                                  updateFlatBalances(activeCycle.id, flat.id, pendingAmt, val, true);
-                                }}
+                                onChange={(e) => handleAdvanceChange(flat.id, row.pendingAmt, Number(e.target.value))}
                                 className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-emerald-300 bg-white text-emerald-900 text-right focus:ring-2 focus:ring-emerald-500/30 shadow-2xs"
                                 placeholder="0"
                               />
@@ -1711,22 +1814,22 @@ export const AdminDashboard: React.FC = () => {
                             <span className="text-[10px] font-bold uppercase tracking-wider text-amber-950 block">
                               Net Payable Amount:
                             </span>
-                            {(pendingAmt > 0 || advanceAmt > 0) && (
+                            {(row.pendingAmt > 0 || row.advanceAmt > 0) && (
                               <span className="text-[10px] text-slate-500 font-mono block">
-                                Base ₹{totalAmt} {pendingAmt > 0 ? `+ ₹${pendingAmt}` : ''} {advanceAmt > 0 ? `- ₹${advanceAmt}` : ''}
+                                Base ₹{row.monthBill} {row.pendingAmt > 0 ? `+ ₹${row.pendingAmt}` : ''} {row.advanceAmt > 0 ? `- ₹${row.advanceAmt}` : ''}
                               </span>
                             )}
-                            {advanceAmt >= (totalAmt + pendingAmt) && (totalAmt + pendingAmt) > 0 && (
+                            {row.isFullyCoveredByAdvance && (
                               <span className="text-[10px] text-emerald-800 font-bold block mt-0.5">
-                                ✨ Remaining Advance: ₹{advanceAmt - (totalAmt + pendingAmt)} (for next month)
+                                ✨ Remaining Advance: ₹{row.surplusAdvance} (for next month)
                               </span>
                             )}
                           </div>
                           <div className="text-right">
                             <span className="text-base font-mono font-extrabold text-amber-950 block">
-                              ₹{netBill.toLocaleString('en-IN')}/-
+                              ₹{row.netPayable.toLocaleString('en-IN')}/-
                             </span>
-                            {netBill === 0 && advanceAmt > 0 && (
+                            {row.netPayable === 0 && row.advanceAmt > 0 && (
                               <span className="inline-block text-[9px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300">
                                 Paid via Advance
                               </span>
@@ -1835,11 +1938,19 @@ export const AdminDashboard: React.FC = () => {
                             id="add-column-table-header-btn"
                             onClick={handleOpenAddColumnModal}
                             className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-800 bg-white hover:bg-indigo-50 border border-dashed border-indigo-300 hover:border-indigo-400 rounded-lg transition-all shadow-2xs whitespace-nowrap cursor-pointer"
-                            title="Add an extra fee column like Building Charge"
+                            title="Add an extra fee column like Submersible Repair"
                           >
                             <Plus className="w-3 h-3 text-indigo-600" />
                             <span>Add Col</span>
                           </button>
+                        </th>
+
+                        {/* Month Bill Column */}
+                        <th className="p-2.5 text-right whitespace-nowrap min-w-28 font-bold text-slate-800 border-l border-slate-200">
+                          <div className="flex flex-col items-end">
+                            <span>Month Bill</span>
+                            <span className="text-[10px] text-slate-400 font-normal">Base + Charges (₹)</span>
+                          </div>
                         </th>
 
                         {/* Column 1: Pending Amount (Previous Month Dues) */}
@@ -1869,51 +1980,22 @@ export const AdminDashboard: React.FC = () => {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {activeCycleFlats.map((flat) => {
-                        const prev = draftReadings[flat.id]?.previous ?? flat.baselineReading;
-                        const curr = draftReadings[flat.id]?.current ?? prev;
-                        const units = Math.max(0, curr - prev);
-                        const isInvalid = curr < prev;
-
-                        // Calculate flat's rate
-                        const rate = flat.customRatePerUnit !== undefined && flat.customRatePerUnit > 0
-                          ? flat.customRatePerUnit
-                          : previewCalculation.effectiveRatePerUnit;
-                        const energyAmt = Math.round(units * rate);
-                        const isShopFlat = (flat.flatNumber || '').toLowerCase().includes('shop') || (flat.id || '').toLowerCase().includes('shop');
-                        const commonAmt = draftReadings[flat.id]?.commonMeterCharges !== undefined
-                          ? draftReadings[flat.id]?.commonMeterCharges
-                          : (isShopFlat ? 0 : (settings.defaultCommonMeterCharges ?? 160));
-                        const maintAmt = draftReadings[flat.id]?.maintenanceCharges !== undefined
-                          ? draftReadings[flat.id]?.maintenanceCharges
-                          : (isShopFlat ? 0 : (settings.defaultMaintenanceCharges ?? 110));
-
-                        // Sum all custom charges for this flat
-                        let customChargesSum = 0;
-                        activeCustomColumns.forEach((col) => {
-                          const flatCharges = draftReadings[flat.id]?.customCharges;
-                          const val = flatCharges?.[col.id] ?? flatCharges?.[col.name] ?? col.defaultAmount ?? 0;
-                          customChargesSum += Number(val) || 0;
-                        });
-
-                        const totalAmt = energyAmt + commonAmt + maintAmt + customChargesSum;
-                        const pendingAmt = draftReadings[flat.id]?.pendingAmount ?? 0;
-                        const advanceAmt = draftReadings[flat.id]?.advanceAmount ?? 0;
-                        const netBill = Math.max(0, totalAmt + pendingAmt - advanceAmt);
+                        const row = getUnifiedFlatRow(flat.id);
 
                         return (
                           <tr key={flat.id} className="hover:bg-slate-50/70 transition-colors">
                             <td className="p-2.5 font-bold text-slate-900 sticky left-0 bg-white z-10 shadow-[2px_0_4px_rgba(0,0,0,0.06)]">
                               <div className="flex items-center gap-1">
                                 <span className="inline-block px-2 py-0.5 rounded bg-slate-100 border border-slate-200 font-mono text-xs font-bold text-slate-900">
-                                  {flat.flatNumber.toLowerCase().includes('shop') || flat.flatNumber.toLowerCase().startsWith('flat')
-                                    ? flat.flatNumber
-                                    : `Flat ${flat.flatNumber}`}
+                                  {row.flatDisplay.toLowerCase().includes('shop') || row.flatDisplay.toLowerCase().startsWith('flat')
+                                    ? row.flatDisplay
+                                    : `Flat ${row.flatDisplay}`}
                                 </span>
                                 <button
                                   type="button"
                                   onClick={() => setEditingFlat(flat)}
                                   className="p-1 rounded-md text-slate-400 hover:text-amber-700 hover:bg-amber-100/60 transition-colors"
-                                  title={`Edit Flat ${flat.flatNumber}, resident name, or mobile number`}
+                                  title={`Edit Flat ${row.flatDisplay}, resident name, or mobile number`}
                                 >
                                   <Edit3 className="w-3 h-3 text-amber-600" />
                                 </button>
@@ -1922,16 +2004,16 @@ export const AdminDashboard: React.FC = () => {
                             <td className="p-2.5">
                               <div className="flex items-center justify-between gap-1.5">
                                 <div>
-                                  <div className="font-semibold text-slate-800">{flat.ownerName}</div>
+                                  <div className="font-semibold text-slate-800">{row.residentName}</div>
                                   <div className="text-[10px] font-mono text-slate-500">
-                                    +91 {flat.phone}
+                                    {row.residentPhone ? `+91 ${row.residentPhone}` : 'No phone'}
                                   </div>
                                 </div>
                                 <button
                                   type="button"
                                   onClick={() => setEditingFlat(flat)}
                                   className="text-[10px] px-1.5 py-0.5 bg-slate-100 hover:bg-amber-50 text-slate-600 hover:text-amber-800 border border-slate-200 rounded font-semibold transition-colors shrink-0"
-                                  title={`Edit Flat ${flat.flatNumber} details`}
+                                  title={`Edit Flat ${row.flatDisplay} details`}
                                 >
                                   Edit
                                 </button>
@@ -1940,75 +2022,46 @@ export const AdminDashboard: React.FC = () => {
                             <td className="p-2.5">
                               <input
                                 type="number"
-                                value={prev === 0 ? '' : prev}
+                                value={row.prevReading === 0 ? '' : row.prevReading}
                                 onFocus={(e) => e.target.select()}
                                 placeholder="0"
-                                onChange={(e) => {
-                                  const val = e.target.value === '' ? 0 : Number(e.target.value);
-                                  setDraftReadings((prevMap) => ({
-                                    ...prevMap,
-                                    [flat.id]: {
-                                      ...prevMap[flat.id],
-                                      previous: val,
-                                      current: curr,
-                                    },
-                                  }));
-                                }}
+                                onChange={(e) => handlePrevReadingChange(flat.id, Number(e.target.value))}
                                 className="w-24 px-2 py-1 text-xs font-mono font-semibold rounded-lg border bg-slate-50 border-slate-200 text-slate-800 focus:bg-white focus:ring-2 focus:ring-amber-500/30"
-                                title={`Edit previous meter reading for Flat ${flat.flatNumber}`}
+                                title={`Edit previous meter reading for Flat ${row.flatDisplay}`}
                               />
                             </td>
                             <td className="p-2.5">
                               <input
                                 type="number"
-                                value={curr === 0 ? '' : curr}
+                                value={row.currReading === 0 ? '' : row.currReading}
                                 onFocus={(e) => e.target.select()}
                                 placeholder="0"
-                                onChange={(e) => {
-                                  const val = e.target.value === '' ? 0 : Number(e.target.value);
-                                  setDraftReadings((prevMap) => ({
-                                    ...prevMap,
-                                    [flat.id]: {
-                                      ...prevMap[flat.id],
-                                      previous: prev,
-                                      current: val,
-                                    },
-                                  }));
-                                }}
+                                onChange={(e) => handleCurrReadingChange(flat.id, Number(e.target.value))}
                                 className={`w-24 px-2 py-1 text-xs font-mono font-bold rounded-lg border ${
-                                  isInvalid
+                                  row.isInvalidReading
                                     ? 'bg-rose-50 border-rose-400 text-rose-700'
                                     : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:ring-2 focus:ring-amber-500/30'
                                 }`}
                               />
-                              {isInvalid && (
+                              {row.isInvalidReading && (
                                 <span className="text-[9px] text-rose-600 block mt-0.5 font-semibold">
-                                  Must be ≥ {prev}
+                                  Must be ≥ {row.prevReading}
                                 </span>
                               )}
                             </td>
                             <td className="p-2.5 text-center font-mono font-bold text-amber-700">
-                              {units} u
-                              <span className="text-[10px] font-normal text-slate-400 block">@ ₹{rate.toFixed(1)}/u</span>
+                              {row.units} u
+                              <span className="text-[10px] font-normal text-slate-400 block">@ ₹{row.rate.toFixed(1)}/u</span>
                             </td>
-                            <td className="p-2.5 text-right font-semibold text-slate-800">
-                              ₹{energyAmt.toLocaleString('en-IN')}
+                            <td className="p-2.5 text-right font-semibold text-slate-800 font-mono">
+                              ₹{row.energyAmt.toLocaleString('en-IN')}
                             </td>
                             <td className="p-2.5 text-center">
                               <input
                                 type="number"
-                                value={commonAmt === 0 ? '' : commonAmt}
+                                value={row.commonAmt === 0 ? '' : row.commonAmt}
                                 onFocus={(e) => e.target.select()}
-                                onChange={(e) => {
-                                  const val = e.target.value === '' ? 0 : Number(e.target.value);
-                                  setDraftReadings((prevMap) => ({
-                                    ...prevMap,
-                                    [flat.id]: {
-                                      ...prevMap[flat.id],
-                                      commonMeterCharges: val,
-                                    },
-                                  }));
-                                }}
+                                onChange={(e) => handleCommonMeterChange(flat.id, Number(e.target.value))}
                                 className="w-20 px-2 py-1 text-xs font-mono font-semibold rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500/30 text-center"
                                 placeholder="0"
                               />
@@ -2016,18 +2069,9 @@ export const AdminDashboard: React.FC = () => {
                             <td className="p-2.5 text-center">
                               <input
                                 type="number"
-                                value={maintAmt === 0 ? '' : maintAmt}
+                                value={row.maintAmt === 0 ? '' : row.maintAmt}
                                 onFocus={(e) => e.target.select()}
-                                onChange={(e) => {
-                                  const val = e.target.value === '' ? 0 : Number(e.target.value);
-                                  setDraftReadings((prevMap) => ({
-                                    ...prevMap,
-                                    [flat.id]: {
-                                      ...prevMap[flat.id],
-                                      maintenanceCharges: val,
-                                    },
-                                  }));
-                                }}
+                                onChange={(e) => handleMaintenanceChange(flat.id, Number(e.target.value))}
                                 className="w-20 px-2 py-1 text-xs font-mono font-semibold rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500/30 text-center"
                                 placeholder="0"
                               />
@@ -2035,8 +2079,7 @@ export const AdminDashboard: React.FC = () => {
 
                             {/* Dynamic Custom Fee Columns Inputs */}
                             {activeCustomColumns.map((col) => {
-                              const flatCharges = draftReadings[flat.id]?.customCharges;
-                              const val = flatCharges?.[col.id] ?? flatCharges?.[col.name] ?? col.defaultAmount ?? 0;
+                              const val = row.flatCustomValues[col.id] ?? col.defaultAmount ?? 0;
                               return (
                                 <td key={col.id} className="p-2.5 text-center bg-indigo-50/20 border-l border-indigo-100/60">
                                   <input
@@ -2052,7 +2095,7 @@ export const AdminDashboard: React.FC = () => {
                                     }
                                     className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-indigo-200 bg-white focus:ring-2 focus:ring-indigo-500/30 text-center text-indigo-950"
                                     placeholder="0"
-                                    title={`${col.name} for Flat ${flat.flatNumber}`}
+                                    title={`${col.name} for Flat ${row.flatDisplay}`}
                                   />
                                 </td>
                               );
@@ -2063,30 +2106,22 @@ export const AdminDashboard: React.FC = () => {
                               —
                             </td>
 
+                            {/* Month Bill (Total Bill) Cell */}
+                            <td className="p-2.5 text-right font-mono font-bold text-slate-900 border-l border-slate-100">
+                              ₹{row.monthBill.toLocaleString('en-IN')}
+                            </td>
+
                             {/* Column 1: Pending Amount (Previous Month Dues) Input */}
                             <td className="p-2.5 text-center bg-rose-50/20 border-l border-rose-100">
                               <input
                                 type="number"
                                 min="0"
-                                value={pendingAmt === 0 ? '' : pendingAmt}
+                                value={row.pendingAmt === 0 ? '' : row.pendingAmt}
                                 onFocus={(e) => e.target.select()}
-                                onChange={(e) => {
-                                  const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
-                                  setDraftReadings((prevMap) => ({
-                                    ...prevMap,
-                                    [flat.id]: {
-                                      ...prevMap[flat.id],
-                                      pendingAmount: val,
-                                    },
-                                  }));
-                                }}
-                                onBlur={(e) => {
-                                  const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
-                                  updateFlatBalances(activeCycle.id, flat.id, val, advanceAmt, true);
-                                }}
+                                onChange={(e) => handlePendingChange(flat.id, Number(e.target.value), row.advanceAmt)}
                                 className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-rose-200 bg-white focus:ring-2 focus:ring-rose-500/30 text-center text-rose-800 shadow-2xs"
                                 placeholder="0"
-                                title={`Pending money from previous month for Flat ${flat.flatNumber}`}
+                                title={`Pending money from previous month for Flat ${row.flatDisplay}`}
                               />
                             </td>
 
@@ -2095,47 +2130,34 @@ export const AdminDashboard: React.FC = () => {
                               <input
                                 type="number"
                                 min="0"
-                                value={advanceAmt === 0 ? '' : advanceAmt}
+                                value={row.advanceAmt === 0 ? '' : row.advanceAmt}
                                 onFocus={(e) => e.target.select()}
-                                onChange={(e) => {
-                                  const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
-                                  setDraftReadings((prevMap) => ({
-                                    ...prevMap,
-                                    [flat.id]: {
-                                      ...prevMap[flat.id],
-                                      advanceAmount: val,
-                                    },
-                                  }));
-                                }}
-                                onBlur={(e) => {
-                                  const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
-                                  updateFlatBalances(activeCycle.id, flat.id, pendingAmt, val, true);
-                                }}
+                                onChange={(e) => handleAdvanceChange(flat.id, row.pendingAmt, Number(e.target.value))}
                                 className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-emerald-200 bg-white focus:ring-2 focus:ring-emerald-500/30 text-center text-emerald-800 shadow-2xs"
                                 placeholder="0"
-                                title={`Advance credit deduction for Flat ${flat.flatNumber}`}
+                                title={`Advance credit deduction for Flat ${row.flatDisplay}`}
                               />
                             </td>
 
                             <td className="p-2.5 text-right font-extrabold whitespace-nowrap">
-                              <div className="text-amber-900 text-sm">
-                                ₹{netBill.toLocaleString('en-IN')}/-
+                              <div className="text-amber-900 text-sm font-mono">
+                                ₹{row.netPayable.toLocaleString('en-IN')}/-
                               </div>
-                              {netBill === 0 && advanceAmt > 0 && (
+                              {row.netPayable === 0 && row.advanceAmt > 0 && (
                                 <span className="inline-block text-[9px] font-bold text-emerald-800 bg-emerald-100 px-1 rounded border border-emerald-300">
                                   Paid via Advance
                                 </span>
                               )}
-                              {(pendingAmt > 0 || advanceAmt > 0) && (
+                              {(row.pendingAmt > 0 || row.advanceAmt > 0) && (
                                 <div className="text-[10px] font-mono font-medium text-slate-500 space-x-1">
-                                  {pendingAmt > 0 && <span className="text-rose-600 font-bold">+{pendingAmt}</span>}
-                                  {advanceAmt > 0 && <span className="text-emerald-600 font-bold">-{advanceAmt}</span>}
-                                  <span className="text-slate-400">base ₹{totalAmt}</span>
+                                  {row.pendingAmt > 0 && <span className="text-rose-600 font-bold">+{row.pendingAmt}</span>}
+                                  {row.advanceAmt > 0 && <span className="text-emerald-600 font-bold">-{row.advanceAmt}</span>}
+                                  <span className="text-slate-400">base ₹{row.monthBill}</span>
                                 </div>
                               )}
-                              {advanceAmt > (totalAmt + pendingAmt) && (
+                              {row.surplusAdvance > 0 && (
                                 <div className="text-[10px] font-mono font-bold text-emerald-700">
-                                  Bal: ₹{advanceAmt - (totalAmt + pendingAmt)} adv
+                                  Bal: ₹{row.surplusAdvance} adv
                                 </div>
                               )}
                             </td>
@@ -2221,7 +2243,7 @@ export const AdminDashboard: React.FC = () => {
 
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-slate-500 font-medium mr-1">
-                Collected: <strong className="text-emerald-700 font-bold">₹{activeCycle.totalCollectedAmount.toLocaleString('en-IN')}</strong> / ₹{activeCycle.totalBilledAmount.toLocaleString('en-IN')}
+                Collected: <strong className="text-emerald-700 font-bold">₹{(liveTotalCollected || activeCycle.totalCollectedAmount).toLocaleString('en-IN')}</strong> / ₹{(liveTotalBilled || activeCycle.totalBilledAmount).toLocaleString('en-IN')}
               </span>
 
               {/* Due Date setting */}
@@ -2419,145 +2441,335 @@ export const AdminDashboard: React.FC = () => {
           {/* VIEW: SPREADSHEET TABLE or CARDS */}
           {paymentViewMode === 'table' ? (
             <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs text-left border-collapse min-w-[950px]">
-                  <thead>
-                    <tr className="bg-slate-100/80 text-slate-700 font-bold border-b border-slate-200">
-                      <th className="p-3 text-center w-16">Flat</th>
-                      <th className="p-3">Resident & Phone</th>
-                      <th className="p-3 text-center">Units</th>
-                      <th className="p-3 text-right">Energy</th>
-                      <th className="p-3 text-right">Common+Maint</th>
-                      <th className="p-3 text-right font-semibold text-slate-800">Month Bill</th>
-                      <th className="p-3 text-center bg-rose-50/70 border-l border-rose-200 text-rose-950">
+              <div className="overflow-x-auto touch-pan-x -mx-1 sm:mx-0 scrollbar-thin">
+                <table className="min-w-[1450px] w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-100 text-slate-700 border-b border-slate-200 uppercase text-[10px] tracking-wider sticky top-0 z-10">
+                    <tr>
+                      <th className="p-2.5 sticky left-0 bg-slate-100 z-20 min-w-28 shadow-[2px_0_4px_rgba(0,0,0,0.06)]">
+                        Flat No.
+                      </th>
+                      <th className="p-2.5 min-w-36">Resident & Phone</th>
+                      <th className="p-2.5 w-28">
+                        <span className="flex items-center gap-1" title="Editable previous reading">
+                          Prev Reading ✏️
+                        </span>
+                      </th>
+                      <th className="p-2.5 w-28">Curr Reading</th>
+                      <th className="p-2.5 text-center">Net Units</th>
+                      <th className="p-2.5 text-right">Energy Amt</th>
+                      <th className="p-2.5 text-center min-w-36">
                         <div className="flex flex-col items-center">
-                          <span>Pending</span>
-                          <span className="text-[10px] text-rose-600 font-normal">Prev Dues (+)</span>
+                          <div className="flex items-center gap-1 bg-white px-2 py-0.5 rounded-lg border border-sky-300 hover:border-sky-500 focus-within:ring-2 focus-within:ring-sky-500/30">
+                            <input
+                              type="text"
+                              value={commonMeterLabel}
+                              onChange={(e) => handleUpdateCommonLabel(e.target.value)}
+                              className="w-28 text-center text-xs font-bold text-sky-900 bg-transparent focus:outline-hidden"
+                              title="Click or type to edit this field label (e.g. Common meter)"
+                            />
+                            <Edit3 className="w-3 h-3 text-sky-500 shrink-0 pointer-events-none" />
+                          </div>
+                          <span className="text-[10px] text-slate-400 mt-0.5">(₹) Amount</span>
                         </div>
                       </th>
-                      <th className="p-3 text-center bg-emerald-50/70 border-l border-emerald-200 text-emerald-950">
+                      <th className="p-2.5 text-center min-w-32">
                         <div className="flex flex-col items-center">
-                          <span>Advance</span>
-                          <span className="text-[10px] text-emerald-600 font-normal">Credit (-)</span>
+                          <div className="flex items-center gap-1 bg-white px-2 py-0.5 rounded-lg border border-amber-300 hover:border-amber-500 focus-within:ring-2 focus-within:ring-amber-500/30">
+                            <input
+                              type="text"
+                              value={maintenanceLabel}
+                              onChange={(e) => handleUpdateMaintenanceLabel(e.target.value)}
+                              className="w-24 text-center text-xs font-bold text-amber-900 bg-transparent focus:outline-hidden"
+                              title="Click or type to edit this field label (e.g. Cleaning or Maintenance)"
+                            />
+                            <Edit3 className="w-3 h-3 text-amber-500 shrink-0 pointer-events-none" />
+                          </div>
+                          <span className="text-[10px] text-slate-400 mt-0.5">(₹) Amount</span>
                         </div>
                       </th>
-                      <th className="p-3 text-right bg-amber-50/70 border-l border-amber-200 font-bold text-amber-950">
-                        Net Payable
+
+                      {/* Dynamic Custom Fee Columns */}
+                      {activeCustomColumns.map((col) => (
+                        <th key={col.id} className="p-2.5 text-center min-w-32 bg-indigo-50/50 border-l border-indigo-100">
+                          <div className="flex flex-col items-center">
+                            <div className="flex items-center gap-1 bg-white px-2 py-0.5 rounded-lg border border-indigo-300 hover:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-500/30">
+                              <input
+                                type="text"
+                                value={col.name}
+                                onChange={(e) => handleRenameColumn(col.id, e.target.value)}
+                                className="w-24 text-center text-xs font-bold text-indigo-950 bg-transparent focus:outline-hidden"
+                                title="Click or type to edit this column name"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveColumn(col.id, col.name)}
+                                className="text-slate-400 hover:text-rose-600 transition-colors p-0.5 cursor-pointer"
+                                title={`Remove ${col.name} column`}
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                            <span className="text-[10px] text-indigo-600 mt-0.5 font-medium">(₹) Amount</span>
+                          </div>
+                        </th>
+                      ))}
+
+                      {/* Header button to quickly add column */}
+                      <th className="p-2.5 text-center w-28 bg-slate-50 border-l border-slate-200">
+                        <button
+                          type="button"
+                          id="payments-add-column-table-header-btn"
+                          onClick={handleOpenAddColumnModal}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-800 bg-white hover:bg-indigo-50 border border-dashed border-indigo-300 hover:border-indigo-400 rounded-lg transition-all shadow-2xs whitespace-nowrap cursor-pointer"
+                          title="Add an extra fee column like Submersible Repair"
+                        >
+                          <Plus className="w-3 h-3 text-indigo-600" />
+                          <span>Add Col</span>
+                        </button>
                       </th>
-                      <th className="p-3 text-right">Paid Amt</th>
-                      <th className="p-3 text-center">Status</th>
-                      <th className="p-3 text-center">Actions</th>
+
+                      {/* Month Bill Column */}
+                      <th className="p-2.5 text-right whitespace-nowrap min-w-28 font-bold text-slate-800 border-l border-slate-200">
+                        <div className="flex flex-col items-end">
+                          <span>Month Bill</span>
+                          <span className="text-[10px] text-slate-400 font-normal">Base + Charges (₹)</span>
+                        </div>
+                      </th>
+
+                      {/* Column 1: Pending Amount (Previous Month Dues) */}
+                      <th className="p-2.5 text-center min-w-28 bg-rose-50/70 border-l border-rose-200 text-rose-950">
+                        <div className="flex flex-col items-center">
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs font-bold text-rose-950">Pending</span>
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-200 text-rose-800 leading-none">+ Add</span>
+                          </div>
+                          <span className="text-[10px] text-rose-600 mt-0.5 font-medium">Prev Dues (₹)</span>
+                        </div>
+                      </th>
+
+                      {/* Column 2: Advance Amount (Credit Deduction) */}
+                      <th className="p-2.5 text-center min-w-28 bg-emerald-50/70 border-l border-emerald-200 text-emerald-950">
+                        <div className="flex flex-col items-center">
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs font-bold text-emerald-950">Advance</span>
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-200 text-emerald-800 leading-none">- Deduct</span>
+                          </div>
+                          <span className="text-[10px] text-emerald-600 mt-0.5 font-medium">Credit (₹)</span>
+                        </div>
+                      </th>
+
+                      <th className="p-2.5 text-right whitespace-nowrap min-w-28 bg-amber-50/70 border-l border-amber-200 font-bold text-amber-950">
+                        Net Payable (₹)
+                      </th>
+                      <th className="p-2.5 text-right whitespace-nowrap min-w-24 border-l border-slate-200">
+                        Paid Amt (₹)
+                      </th>
+                      <th className="p-2.5 text-center whitespace-nowrap min-w-24">
+                        Status
+                      </th>
+                      <th className="p-2.5 text-center whitespace-nowrap min-w-32">
+                        Actions
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredReadings.map((reading) => {
-                      const flat = activeCycleFlats.find((f) => f.id === reading.flatId) || flats.find((f) => f.id === reading.flatId);
-                      const residentName = reading.ownerName || flat?.ownerName || (flat?.flatNumber ? `Flat ${flat.flatNumber}` : `Flat ${reading.flatNumber}`);
-                      const residentPhone = reading.phone || flat?.phone || '';
-                      const isPaid = reading.paymentStatus === 'paid';
-                      const isPartiallyPaid = reading.paymentStatus === 'partially_paid';
-                      const isPending = reading.paymentStatus === 'pending';
-                      const pendingAmt = reading.pendingAmount ?? (reading.previousBalance && reading.previousBalance > 0 ? reading.previousBalance : 0);
-                      const advanceAmt = reading.advanceAmount ?? (reading.previousBalance && reading.previousBalance < 0 ? Math.abs(reading.previousBalance) : 0);
-                      const netAmt = reading.netPayableAmount ?? (reading.totalBillAmount + pendingAmt - advanceAmt);
-                      const isShopReading = (reading.flatNumber || '').toLowerCase().includes('shop') || (reading.flatId || '').toLowerCase().includes('shop');
-                      const commonPlusMaint = (reading.commonMeterCharges !== undefined ? reading.commonMeterCharges : (isShopReading ? 0 : 160)) + (reading.maintenanceCharges !== undefined ? reading.maintenanceCharges : (isShopReading ? 0 : 110));
+                    {filteredFlats.map((flat) => {
+                      const row = getUnifiedFlatRow(flat.id);
 
                       return (
-                        <tr key={reading.flatId} className="hover:bg-slate-50/70 transition-colors">
-                          <td className="p-3 text-center font-extrabold text-slate-900">
-                            {flat?.flatNumber || reading.flatNumber}
-                          </td>
-                          <td className="p-3">
-                            <div className="font-semibold text-slate-800">{residentName}</div>
-                            <div className="text-[11px] text-slate-400 font-mono">{residentPhone ? `+91 ${residentPhone}` : 'No phone registered'}</div>
-                          </td>
-                          <td className="p-3 text-center font-mono font-medium text-slate-700">
-                            {reading.unitsConsumed}
-                          </td>
-                          <td className="p-3 text-right font-mono text-slate-700">
-                            ₹{reading.calculatedAmount.toLocaleString('en-IN')}
-                          </td>
-                          <td className="p-3 text-right font-mono text-slate-700">
-                            ₹{commonPlusMaint.toLocaleString('en-IN')}
-                          </td>
-                          <td className="p-3 text-right font-mono font-bold text-slate-900">
-                            ₹{reading.totalBillAmount.toLocaleString('en-IN')}
-                          </td>
-                          <td className="p-2 text-center bg-rose-50/20 border-l border-rose-100">
-                            <div className="flex flex-col items-center">
-                              <div className="relative">
-                                <span className="absolute left-1.5 top-1 text-[11px] font-bold text-rose-500">₹</span>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={pendingAmt === 0 ? '' : pendingAmt}
-                                  onFocus={(e) => e.target.select()}
-                                  placeholder="0"
-                                  onChange={(e) => {
-                                    const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
-                                    updateFlatBalances(activeCycle.id, reading.flatId, val, advanceAmt, true);
-                                    setDraftReadings((prevMap) => ({
-                                      ...prevMap,
-                                      [reading.flatId]: {
-                                        ...(prevMap[reading.flatId] || { current: reading.currentReading, previous: reading.previousReading }),
-                                        pendingAmount: val,
-                                      },
-                                    }));
-                                  }}
-                                  className="w-20 pl-4 pr-1.5 py-1 text-xs font-mono font-bold rounded-lg border border-rose-200 bg-white text-rose-900 text-center focus:ring-2 focus:ring-rose-500/30 shadow-2xs"
-                                  title={`Edit pending dues from previous month for Flat ${reading.flatNumber}`}
-                                />
-                              </div>
-                              {pendingAmt > 0 && (
-                                <span className="text-[9px] font-semibold text-rose-600 mt-0.5">+ Dues</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="p-2 text-center bg-emerald-50/20 border-l border-emerald-100">
-                            <div className="flex flex-col items-center">
-                              <div className="relative">
-                                <span className="absolute left-1.5 top-1 text-[11px] font-bold text-emerald-500">₹</span>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={advanceAmt === 0 ? '' : advanceAmt}
-                                  onFocus={(e) => e.target.select()}
-                                  placeholder="0"
-                                  onChange={(e) => {
-                                    const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
-                                    updateFlatBalances(activeCycle.id, reading.flatId, pendingAmt, val, true);
-                                    setDraftReadings((prevMap) => ({
-                                      ...prevMap,
-                                      [reading.flatId]: {
-                                        ...(prevMap[reading.flatId] || { current: reading.currentReading, previous: reading.previousReading }),
-                                        advanceAmount: val,
-                                      },
-                                    }));
-                                  }}
-                                  className="w-20 pl-4 pr-1.5 py-1 text-xs font-mono font-bold rounded-lg border border-emerald-200 bg-white text-emerald-900 text-center focus:ring-2 focus:ring-emerald-500/30 shadow-2xs"
-                                  title={`Edit advance credit deduction for Flat ${reading.flatNumber}`}
-                                />
-                              </div>
-                              {advanceAmt > 0 && (
-                                <span className="text-[9px] font-semibold text-emerald-600 mt-0.5">- Credit</span>
-                              )}
-                              {(reading.advancePaid !== undefined && reading.advancePaid > 0) && (
-                                <div className="text-[9px] font-bold text-emerald-700">
-                                  Bal: ₹{reading.advancePaid}
-                                </div>
-                              )}
-                            </div>
-                          </td>
-                          <td className="p-3 text-right bg-amber-50/30 border-l border-amber-100 font-mono font-extrabold text-amber-950 text-sm">
-                            ₹{netAmt.toLocaleString('en-IN')}
-                          </td>
-                          <td className="p-3 text-right font-mono">
-                            {reading.paidAmount !== undefined && reading.paidAmount > 0 ? (
-                              <span className="font-bold text-emerald-700">
-                                ₹{reading.paidAmount.toLocaleString('en-IN')}
+                        <tr key={flat.id} className="hover:bg-slate-50/70 transition-colors">
+                          <td className="p-2.5 font-bold text-slate-900 sticky left-0 bg-white z-10 shadow-[2px_0_4px_rgba(0,0,0,0.06)]">
+                            <div className="flex items-center gap-1">
+                              <span className="inline-block px-2 py-0.5 rounded bg-slate-100 border border-slate-200 font-mono text-xs font-bold text-slate-900">
+                                {row.flatDisplay.toLowerCase().includes('shop') || row.flatDisplay.toLowerCase().startsWith('flat')
+                                  ? row.flatDisplay
+                                  : `Flat ${row.flatDisplay}`}
                               </span>
-                            ) : isPaid && advanceAmt >= (reading.totalBillAmount + pendingAmt) ? (
+                              <button
+                                type="button"
+                                onClick={() => setEditingFlat(flat)}
+                                className="p-1 rounded-md text-slate-400 hover:text-amber-700 hover:bg-amber-100/60 transition-colors"
+                                title={`Edit Flat ${row.flatDisplay}, resident name, or mobile number`}
+                              >
+                                <Edit3 className="w-3 h-3 text-amber-600" />
+                              </button>
+                            </div>
+                          </td>
+                          <td className="p-2.5">
+                            <div className="flex items-center justify-between gap-1.5">
+                              <div>
+                                <div className="font-semibold text-slate-800">{row.residentName}</div>
+                                <div className="text-[10px] font-mono text-slate-500">
+                                  {row.residentPhone ? `+91 ${row.residentPhone}` : 'No phone registered'}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setEditingFlat(flat)}
+                                className="text-[10px] px-1.5 py-0.5 bg-slate-100 hover:bg-amber-50 text-slate-600 hover:text-amber-800 border border-slate-200 rounded font-semibold transition-colors shrink-0"
+                                title={`Edit Flat ${row.flatDisplay} details`}
+                              >
+                                Edit
+                              </button>
+                            </div>
+                          </td>
+                          <td className="p-2.5">
+                            <input
+                              type="number"
+                              value={row.prevReading === 0 ? '' : row.prevReading}
+                              onFocus={(e) => e.target.select()}
+                              placeholder="0"
+                              onChange={(e) => handlePrevReadingChange(flat.id, Number(e.target.value))}
+                              className="w-24 px-2 py-1 text-xs font-mono font-semibold rounded-lg border bg-slate-50 border-slate-200 text-slate-800 focus:bg-white focus:ring-2 focus:ring-amber-500/30"
+                              title={`Edit previous meter reading for Flat ${row.flatDisplay}`}
+                            />
+                          </td>
+                          <td className="p-2.5">
+                            <input
+                              type="number"
+                              value={row.currReading === 0 ? '' : row.currReading}
+                              onFocus={(e) => e.target.select()}
+                              placeholder="0"
+                              onChange={(e) => handleCurrReadingChange(flat.id, Number(e.target.value))}
+                              className={`w-24 px-2 py-1 text-xs font-mono font-bold rounded-lg border ${
+                                row.isInvalidReading
+                                  ? 'bg-rose-50 border-rose-400 text-rose-700'
+                                  : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:ring-2 focus:ring-amber-500/30'
+                              }`}
+                            />
+                            {row.isInvalidReading && (
+                              <span className="text-[9px] text-rose-600 block mt-0.5 font-semibold">
+                                Must be ≥ {row.prevReading}
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-2.5 text-center font-mono font-bold text-amber-700">
+                            {row.units} u
+                            <span className="text-[10px] font-normal text-slate-400 block">@ ₹{row.rate.toFixed(1)}/u</span>
+                          </td>
+                          <td className="p-2.5 text-right font-semibold text-slate-800 font-mono">
+                            ₹{row.energyAmt.toLocaleString('en-IN')}
+                          </td>
+                          <td className="p-2.5 text-center">
+                            <input
+                              type="number"
+                              value={row.commonAmt === 0 ? '' : row.commonAmt}
+                              onFocus={(e) => e.target.select()}
+                              onChange={(e) => handleCommonMeterChange(flat.id, Number(e.target.value))}
+                              className="w-20 px-2 py-1 text-xs font-mono font-semibold rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500/30 text-center"
+                              placeholder="0"
+                            />
+                          </td>
+                          <td className="p-2.5 text-center">
+                            <input
+                              type="number"
+                              value={row.maintAmt === 0 ? '' : row.maintAmt}
+                              onFocus={(e) => e.target.select()}
+                              onChange={(e) => handleMaintenanceChange(flat.id, Number(e.target.value))}
+                              className="w-20 px-2 py-1 text-xs font-mono font-semibold rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-amber-500/30 text-center"
+                              placeholder="0"
+                            />
+                          </td>
+
+                          {/* Dynamic Custom Fee Columns Inputs */}
+                          {activeCustomColumns.map((col) => {
+                            const val = row.flatCustomValues[col.id] ?? col.defaultAmount ?? 0;
+                            return (
+                              <td key={col.id} className="p-2.5 text-center bg-indigo-50/20 border-l border-indigo-100/60">
+                                <input
+                                  type="number"
+                                  value={val === 0 ? '' : val}
+                                  onFocus={(e) => e.target.select()}
+                                  onChange={(e) =>
+                                    handleCustomChargeInputChange(
+                                      flat.id,
+                                      col.id,
+                                      e.target.value === '' ? 0 : Number(e.target.value)
+                                    )
+                                  }
+                                  className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-indigo-200 bg-white focus:ring-2 focus:ring-indigo-500/30 text-center text-indigo-950"
+                                  placeholder="0"
+                                  title={`${col.name} for Flat ${row.flatDisplay}`}
+                                />
+                              </td>
+                            );
+                          })}
+
+                          {/* Spacer Cell matching '+ Add Col' header button */}
+                          <td className="p-2.5 text-center text-[11px] text-slate-300 border-l border-slate-100 select-none">
+                            —
+                          </td>
+
+                          {/* Month Bill (Total Bill) Cell */}
+                          <td className="p-2.5 text-right font-mono font-bold text-slate-900 border-l border-slate-100">
+                            ₹{row.monthBill.toLocaleString('en-IN')}
+                          </td>
+
+                          {/* Column 1: Pending Amount (Previous Month Dues) Input */}
+                          <td className="p-2.5 text-center bg-rose-50/20 border-l border-rose-100">
+                            <input
+                              type="number"
+                              min="0"
+                              value={row.pendingAmt === 0 ? '' : row.pendingAmt}
+                              onFocus={(e) => e.target.select()}
+                              onChange={(e) => handlePendingChange(flat.id, Number(e.target.value), row.advanceAmt)}
+                              className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-rose-200 bg-white focus:ring-2 focus:ring-rose-500/30 text-center text-rose-800 shadow-2xs"
+                              placeholder="0"
+                              title={`Pending money from previous month for Flat ${row.flatDisplay}`}
+                            />
+                            {row.pendingAmt > 0 && (
+                              <span className="text-[9px] font-semibold text-rose-600 block mt-0.5">+ Dues</span>
+                            )}
+                          </td>
+
+                          {/* Column 2: Advance Amount (Credit Deduction) Input */}
+                          <td className="p-2.5 text-center bg-emerald-50/20 border-l border-emerald-100">
+                            <input
+                              type="number"
+                              min="0"
+                              value={row.advanceAmt === 0 ? '' : row.advanceAmt}
+                              onFocus={(e) => e.target.select()}
+                              onChange={(e) => handleAdvanceChange(flat.id, row.pendingAmt, Number(e.target.value))}
+                              className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-emerald-200 bg-white focus:ring-2 focus:ring-emerald-500/30 text-center text-emerald-800 shadow-2xs"
+                              placeholder="0"
+                              title={`Advance credit deduction for Flat ${row.flatDisplay}`}
+                            />
+                            {row.advanceAmt > 0 && (
+                              <span className="text-[9px] font-semibold text-emerald-600 block mt-0.5">- Credit</span>
+                            )}
+                            {row.surplusAdvance > 0 && (
+                              <div className="text-[9px] font-bold text-emerald-700 mt-0.5">
+                                Bal: ₹{row.surplusAdvance}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Net Payable Cell */}
+                          <td className="p-2.5 text-right font-extrabold whitespace-nowrap bg-amber-50/30 border-l border-amber-100">
+                            <div className="text-amber-900 text-sm font-mono">
+                              ₹{row.netPayable.toLocaleString('en-IN')}/-
+                            </div>
+                            {row.isFullyCoveredByAdvance && (
+                              <span className="inline-block text-[9px] font-bold text-emerald-800 bg-emerald-100 px-1 rounded border border-emerald-300">
+                                Paid via Advance
+                              </span>
+                            )}
+                            {(row.pendingAmt > 0 || row.advanceAmt > 0) && (
+                              <div className="text-[10px] font-mono font-medium text-slate-500 space-x-1">
+                                {row.pendingAmt > 0 && <span className="text-rose-600 font-bold">+{row.pendingAmt}</span>}
+                                {row.advanceAmt > 0 && <span className="text-emerald-600 font-bold">-{row.advanceAmt}</span>}
+                                <span className="text-slate-400">base ₹{row.monthBill}</span>
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Paid Amount Cell */}
+                          <td className="p-2.5 text-right font-mono border-l border-slate-100">
+                            {row.paidAmt > 0 ? (
+                              <span className="font-bold text-emerald-700">
+                                ₹{row.paidAmt.toLocaleString('en-IN')}
+                              </span>
+                            ) : row.isFullyCoveredByAdvance ? (
                               <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
                                 Advance
                               </span>
@@ -2565,25 +2777,27 @@ export const AdminDashboard: React.FC = () => {
                               <span className="text-slate-400">₹0</span>
                             )}
                           </td>
-                          <td className="p-3 text-center">
-                            {isPaid ? (
+
+                          {/* Status Badge Cell */}
+                          <td className="p-2.5 text-center">
+                            {row.status === 'paid' ? (
                               <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
                                 <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                                 PAID
                               </span>
-                            ) : isPartiallyPaid ? (
+                            ) : row.status === 'partially_paid' ? (
                               <div>
                                 <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
                                   <Clock className="w-3 h-3 text-amber-600" />
                                   PARTIAL
                                 </span>
-                                {reading.remainingBalance !== undefined && reading.remainingBalance > 0 && (
+                                {row.remainingAmt > 0 && (
                                   <div className="text-[10px] font-bold text-amber-700 mt-0.5">
-                                    Due: ₹{reading.remainingBalance.toLocaleString('en-IN')}
+                                    Due: ₹{row.remainingAmt.toLocaleString('en-IN')}
                                   </div>
                                 )}
                               </div>
-                            ) : isPending ? (
+                            ) : row.status === 'pending' ? (
                               <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
                                 <AlertCircle className="w-3 h-3 text-amber-600" />
                                 PENDING
@@ -2594,19 +2808,21 @@ export const AdminDashboard: React.FC = () => {
                                   <AlertCircle className="w-3 h-3 text-rose-600" />
                                   UNPAID
                                 </span>
-                                {reading.remainingBalance !== undefined && reading.remainingBalance > 0 && (
+                                {row.remainingAmt > 0 && (
                                   <div className="text-[10px] font-bold text-rose-700 mt-0.5">
-                                    Due: ₹{reading.remainingBalance.toLocaleString('en-IN')}
+                                    Due: ₹{row.remainingAmt.toLocaleString('en-IN')}
                                   </div>
                                 )}
                               </div>
                             )}
                           </td>
-                          <td className="p-3 text-center">
+
+                          {/* Action Buttons Cell */}
+                          <td className="p-2.5 text-center">
                             <div className="flex items-center justify-center gap-1">
                               <button
                                 type="button"
-                                onClick={() => openPaymentModal(reading)}
+                                onClick={() => openPaymentModal(row.flatId)}
                                 className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-[11px] shadow-2xs transition-colors flex items-center gap-1 cursor-pointer"
                                 title="Record or edit payment"
                               >
@@ -2615,7 +2831,7 @@ export const AdminDashboard: React.FC = () => {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => sendWhatsAppBill(reading)}
+                                onClick={() => sendWhatsAppBill(row.flatId)}
                                 className="p-1 text-emerald-700 hover:bg-emerald-50 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
                                 title="Send WhatsApp Bill"
                               >
@@ -2623,7 +2839,7 @@ export const AdminDashboard: React.FC = () => {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => setSelectedInvoice({ reading, cycle: activeCycle })}
+                                onClick={() => setSelectedInvoice({ reading: getSyncedReadingEntry(row.flatId), cycle: activeCycle })}
                                 className="p-1 text-slate-700 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors cursor-pointer"
                                 title="View Receipt"
                               >
@@ -2640,141 +2856,233 @@ export const AdminDashboard: React.FC = () => {
             </div>
           ) : (
             /* Cards for each flat */
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
-            {filteredReadings.map((reading) => {
-              const flat = activeCycleFlats.find((f) => f.id === reading.flatId) || flats.find((f) => f.id === reading.flatId);
-              const residentName = reading.ownerName || flat?.ownerName || (flat?.flatNumber ? `Flat ${flat.flatNumber}` : `Flat ${reading.flatNumber}`);
-              const residentPhone = reading.phone || flat?.phone || '';
-              const isPaid = reading.paymentStatus === 'paid';
-              const isPartiallyPaid = reading.paymentStatus === 'partially_paid';
-              const isPending = reading.paymentStatus === 'pending';
-              const pendingAmt = reading.pendingAmount ?? (reading.previousBalance && reading.previousBalance > 0 ? reading.previousBalance : 0);
-              const advanceAmt = reading.advanceAmount ?? (reading.previousBalance && reading.previousBalance < 0 ? Math.abs(reading.previousBalance) : 0);
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {filteredFlats.map((flat) => {
+                const row = getUnifiedFlatRow(flat.id);
+                const isPaid = row.status === 'paid';
+                const isPartiallyPaid = row.status === 'partially_paid';
+                const isPending = row.status === 'pending';
 
-              return (
-                <div
-                  key={reading.flatId}
-                  className={`bg-white rounded-2xl border p-3.5 shadow-xs transition-all ${
-                    isPaid
-                      ? 'border-emerald-200'
-                      : isPartiallyPaid
-                      ? 'border-amber-300 bg-amber-50/10'
-                      : isPending
-                      ? 'border-amber-300 bg-amber-50/20'
-                      : 'border-slate-200 hover:border-slate-300'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-extrabold text-sm text-slate-900">
-                          {((flat?.flatNumber || reading.flatNumber) || '').toLowerCase().includes('shop') || ((flat?.flatNumber || reading.flatNumber) || '').toLowerCase().startsWith('flat')
-                            ? (flat?.flatNumber || reading.flatNumber)
-                            : `Flat ${flat?.flatNumber || reading.flatNumber}`}
+                return (
+                  <div
+                    key={flat.id}
+                    className={`bg-white rounded-2xl border p-3.5 shadow-xs transition-all flex flex-col justify-between space-y-2.5 ${
+                      isPaid
+                        ? 'border-emerald-200'
+                        : isPartiallyPaid
+                        ? 'border-amber-300 bg-amber-50/10'
+                        : isPending
+                        ? 'border-amber-300 bg-amber-50/20'
+                        : 'border-slate-200 hover:border-slate-300'
+                    }`}
+                  >
+                    {/* Top: Flat & Resident Details + Status Badge */}
+                    <div className="flex items-start justify-between gap-2 pb-2 border-b border-slate-100">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-extrabold text-sm text-slate-900">
+                            {row.flatDisplay.toLowerCase().includes('shop') || row.flatDisplay.toLowerCase().startsWith('flat')
+                              ? row.flatDisplay
+                              : `Flat ${row.flatDisplay}`}
+                          </span>
+                          <span className="text-xs text-slate-600 font-semibold">({row.residentName})</span>
+                          <button
+                            type="button"
+                            onClick={() => setEditingFlat(flat)}
+                            className="p-1 text-slate-400 hover:text-amber-700 hover:bg-amber-100/60 rounded-md transition-colors"
+                            title={`Edit Flat ${row.flatDisplay}, resident name, or mobile number`}
+                          >
+                            <Edit3 className="w-3 h-3 text-amber-600" />
+                          </button>
+                        </div>
+                        <span className="text-[11px] text-slate-400 font-mono">
+                          {row.residentPhone ? `+91 ${row.residentPhone}` : 'No phone registered'}
                         </span>
-                        <span className="text-xs text-slate-500">({residentName})</span>
-                        <button
-                          type="button"
-                          onClick={() => flat && setEditingFlat(flat)}
-                          className="p-1 text-slate-400 hover:text-amber-700 hover:bg-amber-100/60 rounded-md transition-colors"
-                          title="Edit flat number, resident name, or mobile number"
-                        >
-                          <Edit3 className="w-3 h-3 text-amber-600" />
-                        </button>
                       </div>
-                      <span className="text-[11px] text-slate-400 font-mono">
-                        {residentPhone ? `+91 ${residentPhone}` : 'No phone registered'}
-                      </span>
+
+                      {/* Status Badge */}
+                      <div className="text-right">
+                        {isPaid ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            PAID
+                          </span>
+                        ) : isPartiallyPaid ? (
+                          <div>
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                              <Clock className="w-3 h-3 text-amber-600" />
+                              PARTIAL
+                            </span>
+                            {row.remainingAmt > 0 && (
+                              <div className="text-[10px] font-bold text-amber-700 mt-0.5">
+                                Due: ₹{row.remainingAmt.toLocaleString('en-IN')}
+                              </div>
+                            )}
+                          </div>
+                        ) : isPending ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                            <Clock className="w-3 h-3 text-amber-600" />
+                            VERIFY UTR
+                          </span>
+                        ) : (
+                          <div>
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
+                              <AlertCircle className="w-3 h-3 text-rose-600" />
+                              UNPAID
+                            </span>
+                            {row.remainingAmt > 0 && (
+                              <div className="text-[10px] font-bold text-rose-700 mt-0.5">
+                                Due: ₹{row.remainingAmt.toLocaleString('en-IN')}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
 
-                    {/* Status Badge */}
-                    <div>
-                      {isPaid ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                          PAID
+                    {/* Sub-Meter Readings Inputs / Display */}
+                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                            Prev Reading ✏️
+                          </label>
+                          <input
+                            type="number"
+                            value={row.prevReading === 0 ? '' : row.prevReading}
+                            onFocus={(e) => e.target.select()}
+                            placeholder="0"
+                            onChange={(e) => handlePrevReadingChange(flat.id, Number(e.target.value))}
+                            className="w-full px-2.5 py-1.5 text-xs font-mono font-bold rounded-lg border bg-white border-slate-200 text-slate-800 focus:ring-2 focus:ring-amber-500/30 text-right"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                            Curr Reading
+                          </label>
+                          <input
+                            type="number"
+                            value={row.currReading === 0 ? '' : row.currReading}
+                            onFocus={(e) => e.target.select()}
+                            placeholder="0"
+                            onChange={(e) => handleCurrReadingChange(flat.id, Number(e.target.value))}
+                            className={`w-full px-2.5 py-1.5 text-xs font-mono font-bold rounded-lg border text-right ${
+                              row.isInvalidReading
+                                ? 'bg-rose-50 border-rose-400 text-rose-700'
+                                : 'bg-white border-slate-200 text-slate-900 focus:ring-2 focus:ring-amber-500/30'
+                            }`}
+                          />
+                        </div>
+                      </div>
+                      {row.isInvalidReading && (
+                        <div className="text-[10px] text-rose-600 font-bold bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                          ⚠️ Current reading must be ≥ {row.prevReading}
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-200/70 text-xs">
+                        <span className="text-slate-600">
+                          Units: <strong className="font-mono text-amber-700 font-bold">{row.units} u</strong> (@ ₹{row.rate.toFixed(1)}/u)
                         </span>
-                      ) : isPartiallyPaid ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
-                          <Clock className="w-3 h-3 text-amber-600" />
-                          PARTIALLY PAID
+                        <span className="font-bold text-slate-800">
+                          Energy: <span className="font-mono font-extrabold text-slate-900">₹{row.energyAmt.toLocaleString('en-IN')}</span>
                         </span>
-                      ) : isPending ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
-                          <Clock className="w-3 h-3 text-amber-600" />
-                          VERIFY UTR
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
-                          <AlertCircle className="w-3 h-3 text-rose-600" />
-                          UNPAID
-                        </span>
+                      </div>
+                    </div>
+
+                    {/* Charges Breakdown */}
+                    <div className="space-y-1.5">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-sky-50/60 p-2 rounded-xl border border-sky-200/70">
+                          <label className="block text-[10px] font-bold text-sky-950 truncate mb-1">
+                            {commonMeterLabel}
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-2 top-1.5 text-xs text-sky-600 font-bold">₹</span>
+                            <input
+                              type="number"
+                              value={row.commonAmt === 0 ? '' : row.commonAmt}
+                              onFocus={(e) => e.target.select()}
+                              placeholder="0"
+                              onChange={(e) => handleCommonMeterChange(flat.id, Number(e.target.value))}
+                              className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-sky-300 bg-white text-slate-800 text-right focus:ring-2 focus:ring-sky-500/30"
+                            />
+                          </div>
+                        </div>
+                        <div className="bg-amber-50/60 p-2 rounded-xl border border-amber-200/70">
+                          <label className="block text-[10px] font-bold text-amber-950 truncate mb-1">
+                            {maintenanceLabel}
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-2 top-1.5 text-xs text-amber-600 font-bold">₹</span>
+                            <input
+                              type="number"
+                              value={row.maintAmt === 0 ? '' : row.maintAmt}
+                              onFocus={(e) => e.target.select()}
+                              placeholder="0"
+                              onChange={(e) => handleMaintenanceChange(flat.id, Number(e.target.value))}
+                              className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-amber-300 bg-white text-slate-800 text-right focus:ring-2 focus:ring-amber-500/30"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Dynamic Custom Charges (e.g. Submersible Repair) */}
+                      {activeCustomColumns.length > 0 && (
+                        <div className="grid grid-cols-2 gap-2">
+                          {activeCustomColumns.map((col) => {
+                            const val = row.flatCustomValues[col.id] ?? col.defaultAmount ?? 0;
+                            return (
+                              <div key={col.id} className="bg-indigo-50/60 p-2 rounded-xl border border-indigo-200/70">
+                                <label className="block text-[10px] font-bold text-indigo-950 truncate mb-1">
+                                  {col.name}
+                                </label>
+                                <div className="relative">
+                                  <span className="absolute left-2 top-1.5 text-xs text-indigo-600 font-bold">₹</span>
+                                  <input
+                                    type="number"
+                                    value={val === 0 ? '' : val}
+                                    onFocus={(e) => e.target.select()}
+                                    placeholder="0"
+                                    onChange={(e) =>
+                                      handleCustomChargeInputChange(
+                                        flat.id,
+                                        col.id,
+                                        e.target.value === '' ? 0 : Number(e.target.value)
+                                      )
+                                    }
+                                    className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-indigo-300 bg-white text-indigo-950 text-right focus:ring-2 focus:ring-indigo-500/30"
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
                     </div>
-                  </div>
 
-                  {/* Consumption & Charges breakdown */}
-                  <div className="my-2.5 p-2 bg-slate-50 rounded-xl text-xs space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] text-slate-500">
-                        {reading.unitsConsumed} Units @ ₹{reading.ratePerUnit.toFixed(1)}/u:
-                      </span>
-                      <span className="font-semibold text-slate-800">
-                        ₹{reading.calculatedAmount.toLocaleString('en-IN')}/-
-                      </span>
-                    </div>
-                    {((reading.commonMeterCharges !== undefined ? reading.commonMeterCharges : ((reading.flatNumber || '').toLowerCase().includes('shop') || (reading.flatId || '').toLowerCase().includes('shop') ? 0 : (settings.defaultCommonMeterCharges ?? 160))) > 0) && (
-                      <div className="flex items-center justify-between text-[11px] text-slate-500">
-                        <span>{reading.commonMeterLabel || commonMeterLabel || settings.defaultCommonMeterLabel || 'Water & stairs light'}:</span>
-                        <span className="font-medium text-slate-700">
-                          ₹{(reading.commonMeterCharges !== undefined ? reading.commonMeterCharges : ((reading.flatNumber || '').toLowerCase().includes('shop') || (reading.flatId || '').toLowerCase().includes('shop') ? 0 : (settings.defaultCommonMeterCharges ?? 160))).toLocaleString('en-IN')}/-
-                        </span>
-                      </div>
-                    )}
-                    {((reading.maintenanceCharges !== undefined ? reading.maintenanceCharges : ((reading.flatNumber || '').toLowerCase().includes('shop') || (reading.flatId || '').toLowerCase().includes('shop') ? 0 : (settings.defaultMaintenanceCharges ?? 110))) > 0) && (
-                      <div className="flex items-center justify-between text-[11px] text-slate-500">
-                        <span>{reading.maintenanceLabel || maintenanceLabel || settings.defaultMaintenanceLabel || 'Cleaning'}:</span>
-                        <span className="font-medium text-slate-700">
-                          ₹{(reading.maintenanceCharges !== undefined ? reading.maintenanceCharges : ((reading.flatNumber || '').toLowerCase().includes('shop') || (reading.flatId || '').toLowerCase().includes('shop') ? 0 : (settings.defaultMaintenanceCharges ?? 110))).toLocaleString('en-IN')}/-
-                        </span>
-                      </div>
-                    )}
-
-                    <div className="border-t border-slate-200 pt-1 flex items-center justify-between text-slate-600">
-                      <span className="text-[11px] font-medium">Month Bill:</span>
-                      <span className="font-bold text-slate-800">
-                        ₹{reading.totalBillAmount.toLocaleString('en-IN')}/-
-                      </span>
+                    {/* Month Bill Row */}
+                    <div className="p-2 bg-slate-100/80 rounded-xl flex items-center justify-between text-xs border border-slate-200">
+                      <span className="font-semibold text-slate-700">Month Bill (Base + Charges):</span>
+                      <span className="font-mono font-bold text-slate-900">₹{row.monthBill.toLocaleString('en-IN')}/-</span>
                     </div>
 
-                    {/* Interactive Balance Adjustment (Pending Dues / Advance Credit) */}
-                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200">
+                    {/* Balance Adjustments: Pending (+ Dues) & Advance (- Credit) */}
+                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100">
                       <div className="bg-rose-50/70 p-2 rounded-xl border border-rose-200">
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-[10px] font-bold text-rose-950 uppercase">Pending</span>
                           <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-rose-200 text-rose-800">+ Dues</span>
                         </div>
                         <div className="relative">
-                          <span className="absolute left-2 top-1 text-xs text-rose-600 font-bold">₹</span>
+                          <span className="absolute left-2 top-1.5 text-xs text-rose-600 font-bold">₹</span>
                           <input
                             type="number"
                             min="0"
-                            value={pendingAmt === 0 ? '' : pendingAmt}
+                            value={row.pendingAmt === 0 ? '' : row.pendingAmt}
                             onFocus={(e) => e.target.select()}
-                            placeholder="0"
-                            onChange={(e) => {
-                              const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
-                              updateFlatBalances(activeCycle.id, reading.flatId, val, advanceAmt, true);
-                              setDraftReadings((prevMap) => ({
-                                ...prevMap,
-                                [reading.flatId]: {
-                                  ...(prevMap[reading.flatId] || { current: reading.currentReading, previous: reading.previousReading }),
-                                  pendingAmount: val,
-                                },
-                              }));
-                            }}
+                            onChange={(e) => handlePendingChange(flat.id, Number(e.target.value), row.advanceAmt)}
                             className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-rose-300 bg-white text-rose-900 text-right focus:ring-2 focus:ring-rose-500/30 shadow-2xs"
-                            title={`Edit pending dues from previous month for Flat ${reading.flatNumber}`}
+                            placeholder="0"
                           />
                         </div>
                       </div>
@@ -2785,123 +3093,125 @@ export const AdminDashboard: React.FC = () => {
                           <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-200 text-emerald-800">- Credit</span>
                         </div>
                         <div className="relative">
-                          <span className="absolute left-2 top-1 text-xs text-emerald-600 font-bold">₹</span>
+                          <span className="absolute left-2 top-1.5 text-xs text-emerald-600 font-bold">₹</span>
                           <input
                             type="number"
                             min="0"
-                            value={advanceAmt === 0 ? '' : advanceAmt}
+                            value={row.advanceAmt === 0 ? '' : row.advanceAmt}
                             onFocus={(e) => e.target.select()}
-                            placeholder="0"
-                            onChange={(e) => {
-                              const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
-                              updateFlatBalances(activeCycle.id, reading.flatId, pendingAmt, val, true);
-                              setDraftReadings((prevMap) => ({
-                                ...prevMap,
-                                [reading.flatId]: {
-                                  ...(prevMap[reading.flatId] || { current: reading.currentReading, previous: reading.previousReading }),
-                                  advanceAmount: val,
-                                },
-                              }));
-                            }}
+                            onChange={(e) => handleAdvanceChange(flat.id, row.pendingAmt, Number(e.target.value))}
                             className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-emerald-300 bg-white text-emerald-900 text-right focus:ring-2 focus:ring-emerald-500/30 shadow-2xs"
-                            title={`Edit advance credit deduction for Flat ${reading.flatNumber}`}
+                            placeholder="0"
                           />
                         </div>
-                        {(reading.advancePaid !== undefined && reading.advancePaid > 0) && (
+                        {row.surplusAdvance > 0 && (
                           <div className="text-[9px] font-bold text-emerald-800 bg-emerald-100/70 px-1 py-0.5 rounded mt-1 text-center">
-                            Remaining Adv: ₹{reading.advancePaid}
+                            Remaining Adv: ₹{row.surplusAdvance}
                           </div>
                         )}
                       </div>
                     </div>
 
-                    <div className="border-t border-slate-300 pt-1 flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-slate-800">Net Payable:</span>
-                      <span className="font-extrabold text-slate-900 text-sm">
-                        ₹{(reading.netPayableAmount ?? reading.totalBillAmount).toLocaleString('en-IN')}/-
-                      </span>
+                    {/* Net Payable Summary Banner */}
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-200 bg-amber-50/80 p-2.5 rounded-xl">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-amber-950 block">
+                          Net Payable Amount:
+                        </span>
+                        {(row.pendingAmt > 0 || row.advanceAmt > 0) && (
+                          <span className="text-[10px] text-slate-500 font-mono block">
+                            Base ₹{row.monthBill} {row.pendingAmt > 0 ? `+ ₹${row.pendingAmt}` : ''} {row.advanceAmt > 0 ? `- ₹${row.advanceAmt}` : ''}
+                          </span>
+                        )}
+                        {row.isFullyCoveredByAdvance && (
+                          <span className="text-[10px] text-emerald-800 font-bold block mt-0.5">
+                            ✨ Paid via Advance (Rem: ₹{row.surplusAdvance})
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <span className="text-base font-mono font-extrabold text-amber-950 block">
+                          ₹{row.netPayable.toLocaleString('en-IN')}/-
+                        </span>
+                        {row.netPayable === 0 && row.advanceAmt > 0 && (
+                          <span className="inline-block text-[9px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300">
+                            Paid via Advance
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {/* Recorded Amount Paid & Remaining / Advance status */}
-                    {reading.paidAmount !== undefined && reading.paidAmount > 0 && (
+                    {row.paidAmt > 0 && (
                       <div className="pt-1 border-t border-dashed border-slate-200 text-[11px] space-y-0.5">
                         <div className="flex items-center justify-between text-emerald-700 font-semibold">
                           <span>Amount Paid:</span>
-                          <span className="font-mono">₹{reading.paidAmount.toLocaleString('en-IN')}</span>
+                          <span className="font-mono">₹{row.paidAmt.toLocaleString('en-IN')}</span>
                         </div>
-                        {reading.remainingBalance !== undefined && reading.remainingBalance > 0 && (
+                        {row.remainingAmt > 0 && (
                           <div className="flex items-center justify-between text-amber-700 font-bold">
                             <span>Remaining Due (to next mo):</span>
-                            <span className="font-mono">₹{reading.remainingBalance.toLocaleString('en-IN')}</span>
-                          </div>
-                        )}
-                        {reading.advancePaid !== undefined && reading.advancePaid > 0 && (
-                          <div className="flex items-center justify-between text-emerald-700 font-bold">
-                            <span>Advance Credit (to next mo):</span>
-                            <span className="font-mono">₹{reading.advancePaid.toLocaleString('en-IN')}</span>
+                            <span className="font-mono">₹{row.remainingAmt.toLocaleString('en-IN')}</span>
                           </div>
                         )}
                       </div>
                     )}
 
                     {/* If completely unpaid with remaining balance */}
-                    {reading.paymentStatus !== 'paid' && (!reading.paidAmount || reading.paidAmount === 0) && (reading.remainingBalance !== undefined && reading.remainingBalance > 0) && (
+                    {!isPaid && (!row.paidAmt || row.paidAmt === 0) && row.remainingAmt > 0 && (
                       <div className="pt-1 border-t border-dashed border-slate-200 text-[11px]">
                         <div className="flex items-center justify-between text-rose-700 font-bold">
                           <span>Unpaid Due (Carries to next mo):</span>
-                          <span className="font-mono">₹{reading.remainingBalance.toLocaleString('en-IN')}</span>
+                          <span className="font-mono">₹{row.remainingAmt.toLocaleString('en-IN')}</span>
                         </div>
                       </div>
                     )}
-                  </div>
 
-                  {/* UTR / payment record note */}
-                  {reading.upiReference && (
-                    <div className="mb-2 text-[11px] font-mono text-slate-600 bg-slate-100/80 px-2 py-1 rounded-lg">
-                      UTR: <span className="font-bold text-slate-800">{reading.upiReference}</span>
-                    </div>
-                  )}
-
-                  {/* Actions for Admin */}
-                  <div className="flex items-center gap-1.5 pt-1 border-t border-slate-100">
-                    <button
-                      onClick={() => openPaymentModal(reading)}
-                      className="flex-1 py-1.5 px-2 text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors shadow-xs flex items-center justify-center gap-1"
-                    >
-                      <CreditCard className="w-3 h-3" />
-                      {reading.paidAmount !== undefined && reading.paidAmount > 0 ? 'Edit Payment' : 'Enter Paid Amt'}
-                    </button>
-
-                    {(isPaid || isPartiallyPaid) && (
+                    {/* Actions for Admin */}
+                    <div className="flex items-center gap-1.5 pt-2 border-t border-slate-100">
                       <button
-                        onClick={() => markPaymentStatus(activeCycle.id, reading.flatId, 'unpaid', { paidAmount: 0 })}
-                        className="py-1.5 px-2 text-[11px] font-semibold text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-rose-200"
-                        title="Reset to Unpaid"
+                        type="button"
+                        onClick={() => openPaymentModal(row.flatId)}
+                        className="flex-1 py-1.5 px-2 text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors shadow-xs flex items-center justify-center gap-1 cursor-pointer"
                       >
-                        Reset
+                        <CreditCard className="w-3 h-3" />
+                        {row.paidAmt > 0 ? 'Edit Payment' : 'Enter Paid Amt'}
                       </button>
-                    )}
 
-                    <button
-                      onClick={() => sendWhatsAppBill(reading)}
-                      className="py-1.5 px-2 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors border border-emerald-200 flex items-center gap-1"
-                      title="Send WhatsApp Bill"
-                    >
-                      <Share2 className="w-3 h-3" />
-                      WA
-                    </button>
+                      {(isPaid || isPartiallyPaid) && (
+                        <button
+                          type="button"
+                          onClick={() => markPaymentStatus(activeCycle.id, row.flatId, 'unpaid', { paidAmount: 0 })}
+                          className="py-1.5 px-2 text-[11px] font-semibold text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-rose-200 cursor-pointer"
+                          title="Reset to Unpaid"
+                        >
+                          Reset
+                        </button>
+                      )}
 
-                    <button
-                      onClick={() => setSelectedInvoice({ reading, cycle: activeCycle })}
-                      className="py-1.5 px-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200"
-                    >
-                      Receipt
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => sendWhatsAppBill(row.flatId)}
+                        className="py-1.5 px-2 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors border border-emerald-200 flex items-center gap-1 cursor-pointer"
+                        title="Send WhatsApp Bill"
+                      >
+                        <Share2 className="w-3 h-3" />
+                        WA
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSelectedInvoice({ reading: getSyncedReadingEntry(row.flatId), cycle: activeCycle })}
+                        className="py-1.5 px-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200 cursor-pointer"
+                        title="View Receipt"
+                      >
+                        Receipt
+                      </button>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}
