@@ -43,6 +43,7 @@ export interface FlatReadingEntry {
   totalBillAmount: number; // calculatedAmount + maintenanceCharges + commonMeterCharges + sum(customCharges)
   pendingAmount?: number; // Explicit pending amount from previous month to add into bill
   advanceAmount?: number; // Explicit advance amount to deduct from bill
+  isBalanceManual?: boolean; // Whether pendingAmount or advanceAmount has been manually updated by admin
   previousBalance?: number; // Previous month unpaid dues (+ve) or advance credit (-ve)
   netPayableAmount?: number; // totalBillAmount + (pendingAmount || 0) - (advanceAmount || 0) (or + previousBalance)
   paymentStatus: 'paid' | 'unpaid' | 'pending' | 'partially_paid';

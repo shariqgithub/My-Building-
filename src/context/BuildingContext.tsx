@@ -103,6 +103,13 @@ interface BuildingContextType {
   resetMonthPaymentData: (cycleId: string) => Promise<boolean>;
   resetAllPaymentsData: () => Promise<boolean>;
   removeMonthCycle: (cycleId: string) => Promise<boolean>;
+  updateFlatBalances: (
+    cycleId: string,
+    flatId: string,
+    pendingAmount: number,
+    advanceAmount: number,
+    isManual?: boolean
+  ) => void;
   markPaymentStatus: (
     cycleId: string,
     flatId: string,
@@ -112,6 +119,8 @@ interface BuildingContextType {
       upiRef?: string;
       paidAmount?: number;
       adminNotes?: string;
+      pendingAmount?: number;
+      advanceAmount?: number;
     }
   ) => void;
   submitResidentPaymentProof: (cycleId: string, flatId: string, upiRef: string, paidAmount: number) => void;
@@ -196,13 +205,19 @@ export function syncCycleBalances(allCycles: BillingCycle[]): BillingCycle[] {
       const currentMonthBill = energy + common + maint + customSum;
 
       // 2. Previous balance carried forward from preceding cycle
-      const carriedBalance = cycleIndex === 0 ? (r.previousBalance ?? 0) : (flatCumulativeBalance.get(r.flatId) ?? 0);
+      const carriedBalance = cycleIndex === 0
+        ? (r.previousBalance ?? 0)
+        : (flatCumulativeBalance.get(r.flatId) ?? (r.flatNumber ? flatCumulativeBalance.get(normalizeFlatNumber(r.flatNumber)) : undefined) ?? 0);
 
       // Handle explicit pendingAmount & advanceAmount if provided, or default from carried balance
       let pendingAmt = 0;
       let advanceAmt = 0;
 
-      if (cycleIndex === 0) {
+      if (r.isBalanceManual) {
+        // Admin has explicitly entered or modified pending/advance values for this flat
+        pendingAmt = Math.max(0, Number(r.pendingAmount) || 0);
+        advanceAmt = Math.max(0, Number(r.advanceAmount) || 0);
+      } else if (cycleIndex === 0) {
         pendingAmt = (r.pendingAmount !== undefined && r.pendingAmount > 0)
           ? r.pendingAmount
           : (carriedBalance > 0 ? carriedBalance : 0);
@@ -282,6 +297,9 @@ export function syncCycleBalances(allCycles: BillingCycle[]): BillingCycle[] {
       // Positive = resident owes money (e.g. +250)
       const balanceToCarry = remaining > 0 ? remaining : (totalAdvanceRemaining > 0 ? -totalAdvanceRemaining : 0);
       flatCumulativeBalance.set(r.flatId, balanceToCarry);
+      if (r.flatNumber) {
+        flatCumulativeBalance.set(normalizeFlatNumber(r.flatNumber), balanceToCarry);
+      }
 
       totalBilled += (currentMonthBill + pendingAmt);
       if (paidAmt && paidAmt > 0) {
@@ -297,6 +315,7 @@ export function syncCycleBalances(allCycles: BillingCycle[]): BillingCycle[] {
         totalBillAmount: currentMonthBill,
         pendingAmount: pendingAmt,
         advanceAmount: advanceAmt,
+        isBalanceManual: r.isBalanceManual ?? false,
         previousBalance: netAdjustment,
         netPayableAmount: netPayable,
         paidAmount: paidAmt,
@@ -2085,6 +2104,44 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const updateFlatBalances = (
+    cycleId: string,
+    flatId: string,
+    pendingAmount: number,
+    advanceAmount: number,
+    isManual: boolean = true
+  ) => {
+    let finalUpdatedCycles: BillingCycle[] = [];
+    setCycles((prev) => {
+      const updated = prev.map((c) => {
+        if (c.id !== cycleId) return c;
+        const updatedReadings = c.readings.map((r) => {
+          if (r.flatId !== flatId && (!r.flatNumber || normalizeFlatNumber(r.flatNumber) !== normalizeFlatNumber(flatId))) {
+            return r;
+          }
+          const validPending = Math.max(0, Number(pendingAmount) || 0);
+          const validAdvance = Math.max(0, Number(advanceAmount) || 0);
+          return {
+            ...r,
+            pendingAmount: validPending,
+            advanceAmount: validAdvance,
+            isBalanceManual: isManual,
+          };
+        });
+        return {
+          ...c,
+          readings: updatedReadings,
+        };
+      });
+      finalUpdatedCycles = syncCycleBalances(updated);
+      return finalUpdatedCycles;
+    });
+
+    if (finalUpdatedCycles.length > 0) {
+      saveToCloud(undefined, undefined, finalUpdatedCycles);
+    }
+  };
+
   const markPaymentStatus = (
     cycleId: string,
     flatId: string,
@@ -2094,6 +2151,8 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       upiRef?: string;
       paidAmount?: number;
       adminNotes?: string;
+      pendingAmount?: number;
+      advanceAmount?: number;
     }
   ) => {
     let finalUpdatedCycles: BillingCycle[] = [];
@@ -2101,12 +2160,12 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const updated = prev.map((c) => {
         if (c.id !== cycleId) return c;
         const updatedReadings = c.readings.map((r) => {
-          if (r.flatId !== flatId) return r;
+          if (r.flatId !== flatId && (!r.flatNumber || normalizeFlatNumber(r.flatNumber) !== normalizeFlatNumber(flatId))) return r;
           const isPaying = status === 'paid' || status === 'partially_paid';
           const net = r.netPayableAmount ?? r.totalBillAmount;
           const effectivePaid = isPaying ? (details?.paidAmount !== undefined ? details.paidAmount : net) : undefined;
 
-          return {
+          const updatedReading: FlatReadingEntry = {
             ...r,
             paymentStatus: status,
             paidAmount: effectivePaid,
@@ -2115,6 +2174,17 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             upiReference: details?.upiRef || r.upiReference,
             adminNotes: details?.adminNotes || r.adminNotes,
           };
+
+          if (details?.pendingAmount !== undefined) {
+            updatedReading.pendingAmount = Math.max(0, Number(details.pendingAmount) || 0);
+            updatedReading.isBalanceManual = true;
+          }
+          if (details?.advanceAmount !== undefined) {
+            updatedReading.advanceAmount = Math.max(0, Number(details.advanceAmount) || 0);
+            updatedReading.isBalanceManual = true;
+          }
+
+          return updatedReading;
         });
 
         return {
@@ -3258,6 +3328,7 @@ export const BuildingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         createNewCycle,
         updateCycleDueDate,
         updateCycleReadings,
+        updateFlatBalances,
         markPaymentStatus,
         submitResidentPaymentProof,
         addExpense,

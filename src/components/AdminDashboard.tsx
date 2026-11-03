@@ -79,6 +79,7 @@ export const AdminDashboard: React.FC = () => {
     saveNewCycle,
     updateCycleDueDate,
     updateCycleReadings,
+    updateFlatBalances,
     markPaymentStatus,
     resetMonthPaymentData,
     resetAllPaymentsData,
@@ -240,13 +241,21 @@ export const AdminDashboard: React.FC = () => {
   const [paymentMethod, setPaymentMethod] = useState<'UPI' | 'Cash' | 'Bank Transfer' | 'Cheque'>('UPI');
   const [paymentUtr, setPaymentUtr] = useState('');
   const [paymentAmountInput, setPaymentAmountInput] = useState<string>('');
+  const [paymentPendingInput, setPaymentPendingInput] = useState<string>('0');
+  const [paymentAdvanceInput, setPaymentAdvanceInput] = useState<string>('0');
   const [qrUploadError, setQrUploadError] = useState<string>('');
 
   const openPaymentModal = (reading: FlatReadingEntry) => {
     setMarkingFlatId(reading.flatId);
+    const curPending = reading.pendingAmount ?? (reading.previousBalance && reading.previousBalance > 0 ? reading.previousBalance : 0);
+    const curAdvance = reading.advanceAmount ?? (reading.previousBalance && reading.previousBalance < 0 ? Math.abs(reading.previousBalance) : 0);
+    setPaymentPendingInput(curPending.toString());
+    setPaymentAdvanceInput(curAdvance.toString());
+
+    const net = reading.netPayableAmount ?? Math.max(0, reading.totalBillAmount + curPending - curAdvance);
     const defaultAmt = reading.paidAmount !== undefined
       ? reading.paidAmount
-      : (reading.netPayableAmount ?? reading.totalBillAmount);
+      : net;
     setPaymentAmountInput(defaultAmt.toString());
     setPaymentMethod((reading.paymentMethod as any) || 'UPI');
     setPaymentUtr(reading.upiReference || '');
@@ -541,6 +550,7 @@ export const AdminDashboard: React.FC = () => {
         customCharges: draftReadings[pr.flatId]?.customCharges || pr.customCharges || {},
         pendingAmount: pendingAmt,
         advanceAmount: advanceAmt,
+        isBalanceManual: true,
         previousBalance: pendingAmt - advanceAmt,
         netPayableAmount: netPayable,
         paymentStatus: status,
@@ -1621,6 +1631,10 @@ export const AdminDashboard: React.FC = () => {
                                     },
                                   }));
                                 }}
+                                onBlur={(e) => {
+                                  const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
+                                  updateFlatBalances(activeCycle.id, flat.id, val, advanceAmt, true);
+                                }}
                                 className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-rose-300 bg-white text-rose-900 text-right focus:ring-2 focus:ring-rose-500/30 shadow-2xs"
                                 placeholder="0"
                               />
@@ -1648,6 +1662,10 @@ export const AdminDashboard: React.FC = () => {
                                       advanceAmount: val,
                                     },
                                   }));
+                                }}
+                                onBlur={(e) => {
+                                  const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
+                                  updateFlatBalances(activeCycle.id, flat.id, pendingAmt, val, true);
                                 }}
                                 className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-emerald-300 bg-white text-emerald-900 text-right focus:ring-2 focus:ring-emerald-500/30 shadow-2xs"
                                 placeholder="0"
@@ -2031,6 +2049,10 @@ export const AdminDashboard: React.FC = () => {
                                     },
                                   }));
                                 }}
+                                onBlur={(e) => {
+                                  const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
+                                  updateFlatBalances(activeCycle.id, flat.id, val, advanceAmt, true);
+                                }}
                                 className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-rose-200 bg-white focus:ring-2 focus:ring-rose-500/30 text-center text-rose-800 shadow-2xs"
                                 placeholder="0"
                                 title={`Pending money from previous month for Flat ${flat.flatNumber}`}
@@ -2053,6 +2075,10 @@ export const AdminDashboard: React.FC = () => {
                                       advanceAmount: val,
                                     },
                                   }));
+                                }}
+                                onBlur={(e) => {
+                                  const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
+                                  updateFlatBalances(activeCycle.id, flat.id, pendingAmt, val, true);
                                 }}
                                 className="w-20 px-2 py-1 text-xs font-mono font-bold rounded-lg border border-emerald-200 bg-white focus:ring-2 focus:ring-emerald-500/30 text-center text-emerald-800 shadow-2xs"
                                 placeholder="0"
@@ -2415,30 +2441,70 @@ export const AdminDashboard: React.FC = () => {
                           <td className="p-3 text-right font-mono font-bold text-slate-900">
                             ₹{reading.totalBillAmount.toLocaleString('en-IN')}
                           </td>
-                          <td className="p-3 text-center bg-rose-50/30 border-l border-rose-100 font-mono font-bold">
-                            {pendingAmt > 0 ? (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200">
-                                +₹{pendingAmt.toLocaleString('en-IN')}
-                              </span>
-                            ) : (
-                              <span className="text-slate-300">—</span>
-                            )}
-                          </td>
-                          <td className="p-3 text-center bg-emerald-50/30 border-l border-emerald-100 font-mono font-bold">
-                            {advanceAmt > 0 ? (
-                              <div>
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                  -₹{advanceAmt.toLocaleString('en-IN')}
-                                </span>
-                                {(reading.advancePaid !== undefined && reading.advancePaid > 0) && (
-                                  <div className="text-[10px] font-bold text-emerald-700 mt-0.5">
-                                    Bal: ₹{reading.advancePaid}
-                                  </div>
-                                )}
+                          <td className="p-2 text-center bg-rose-50/20 border-l border-rose-100">
+                            <div className="flex flex-col items-center">
+                              <div className="relative">
+                                <span className="absolute left-1.5 top-1 text-[11px] font-bold text-rose-500">₹</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={pendingAmt === 0 ? '' : pendingAmt}
+                                  onFocus={(e) => e.target.select()}
+                                  placeholder="0"
+                                  onChange={(e) => {
+                                    const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
+                                    updateFlatBalances(activeCycle.id, reading.flatId, val, advanceAmt, true);
+                                    setDraftReadings((prevMap) => ({
+                                      ...prevMap,
+                                      [reading.flatId]: {
+                                        ...(prevMap[reading.flatId] || { current: reading.currentReading, previous: reading.previousReading }),
+                                        pendingAmount: val,
+                                      },
+                                    }));
+                                  }}
+                                  className="w-20 pl-4 pr-1.5 py-1 text-xs font-mono font-bold rounded-lg border border-rose-200 bg-white text-rose-900 text-center focus:ring-2 focus:ring-rose-500/30 shadow-2xs"
+                                  title={`Edit pending dues from previous month for Flat ${reading.flatNumber}`}
+                                />
                               </div>
-                            ) : (
-                              <span className="text-slate-300">—</span>
-                            )}
+                              {pendingAmt > 0 && (
+                                <span className="text-[9px] font-semibold text-rose-600 mt-0.5">+ Dues</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-2 text-center bg-emerald-50/20 border-l border-emerald-100">
+                            <div className="flex flex-col items-center">
+                              <div className="relative">
+                                <span className="absolute left-1.5 top-1 text-[11px] font-bold text-emerald-500">₹</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={advanceAmt === 0 ? '' : advanceAmt}
+                                  onFocus={(e) => e.target.select()}
+                                  placeholder="0"
+                                  onChange={(e) => {
+                                    const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
+                                    updateFlatBalances(activeCycle.id, reading.flatId, pendingAmt, val, true);
+                                    setDraftReadings((prevMap) => ({
+                                      ...prevMap,
+                                      [reading.flatId]: {
+                                        ...(prevMap[reading.flatId] || { current: reading.currentReading, previous: reading.previousReading }),
+                                        advanceAmount: val,
+                                      },
+                                    }));
+                                  }}
+                                  className="w-20 pl-4 pr-1.5 py-1 text-xs font-mono font-bold rounded-lg border border-emerald-200 bg-white text-emerald-900 text-center focus:ring-2 focus:ring-emerald-500/30 shadow-2xs"
+                                  title={`Edit advance credit deduction for Flat ${reading.flatNumber}`}
+                                />
+                              </div>
+                              {advanceAmt > 0 && (
+                                <span className="text-[9px] font-semibold text-emerald-600 mt-0.5">- Credit</span>
+                              )}
+                              {(reading.advancePaid !== undefined && reading.advancePaid > 0) && (
+                                <div className="text-[9px] font-bold text-emerald-700">
+                                  Bal: ₹{reading.advancePaid}
+                                </div>
+                              )}
+                            </div>
                           </td>
                           <td className="p-3 text-right bg-amber-50/30 border-l border-amber-100 font-mono font-extrabold text-amber-950 text-sm">
                             ₹{netAmt.toLocaleString('en-IN')}
@@ -2539,6 +2605,8 @@ export const AdminDashboard: React.FC = () => {
               const isPaid = reading.paymentStatus === 'paid';
               const isPartiallyPaid = reading.paymentStatus === 'partially_paid';
               const isPending = reading.paymentStatus === 'pending';
+              const pendingAmt = reading.pendingAmount ?? (reading.previousBalance && reading.previousBalance > 0 ? reading.previousBalance : 0);
+              const advanceAmt = reading.advanceAmount ?? (reading.previousBalance && reading.previousBalance < 0 ? Math.abs(reading.previousBalance) : 0);
 
               return (
                 <div
@@ -2636,40 +2704,73 @@ export const AdminDashboard: React.FC = () => {
                       </span>
                     </div>
 
-                    {/* Pending Amount from previous month */}
-                    {reading.pendingAmount !== undefined && reading.pendingAmount > 0 && (
-                      <div className="flex items-center justify-between text-[11px] font-semibold py-0.5 text-rose-700 bg-rose-50/80 px-1.5 rounded">
-                        <span>Pending Dues (+ Prev Mo):</span>
-                        <span className="font-mono font-bold">+₹{reading.pendingAmount.toLocaleString('en-IN')}</span>
+                    {/* Interactive Balance Adjustment (Pending Dues / Advance Credit) */}
+                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200">
+                      <div className="bg-rose-50/70 p-2 rounded-xl border border-rose-200">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] font-bold text-rose-950 uppercase">Pending</span>
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-rose-200 text-rose-800">+ Dues</span>
+                        </div>
+                        <div className="relative">
+                          <span className="absolute left-2 top-1 text-xs text-rose-600 font-bold">₹</span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={pendingAmt === 0 ? '' : pendingAmt}
+                            onFocus={(e) => e.target.select()}
+                            placeholder="0"
+                            onChange={(e) => {
+                              const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
+                              updateFlatBalances(activeCycle.id, reading.flatId, val, advanceAmt, true);
+                              setDraftReadings((prevMap) => ({
+                                ...prevMap,
+                                [reading.flatId]: {
+                                  ...(prevMap[reading.flatId] || { current: reading.currentReading, previous: reading.previousReading }),
+                                  pendingAmount: val,
+                                },
+                              }));
+                            }}
+                            className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-rose-300 bg-white text-rose-900 text-right focus:ring-2 focus:ring-rose-500/30 shadow-2xs"
+                            title={`Edit pending dues from previous month for Flat ${reading.flatNumber}`}
+                          />
+                        </div>
                       </div>
-                    )}
 
-                    {/* Advance Amount deduction */}
-                    {reading.advanceAmount !== undefined && reading.advanceAmount > 0 && (
-                      <div className="flex items-center justify-between text-[11px] font-semibold py-0.5 text-emerald-700 bg-emerald-50/80 px-1.5 rounded">
-                        <span>Advance Credit (- Deduction):</span>
-                        <span className="font-mono font-bold">-₹{reading.advanceAmount.toLocaleString('en-IN')}</span>
+                      <div className="bg-emerald-50/70 p-2 rounded-xl border border-emerald-200">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[10px] font-bold text-emerald-950 uppercase">Advance</span>
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-200 text-emerald-800">- Credit</span>
+                        </div>
+                        <div className="relative">
+                          <span className="absolute left-2 top-1 text-xs text-emerald-600 font-bold">₹</span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={advanceAmt === 0 ? '' : advanceAmt}
+                            onFocus={(e) => e.target.select()}
+                            placeholder="0"
+                            onChange={(e) => {
+                              const val = e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0);
+                              updateFlatBalances(activeCycle.id, reading.flatId, pendingAmt, val, true);
+                              setDraftReadings((prevMap) => ({
+                                ...prevMap,
+                                [reading.flatId]: {
+                                  ...(prevMap[reading.flatId] || { current: reading.currentReading, previous: reading.previousReading }),
+                                  advanceAmount: val,
+                                },
+                              }));
+                            }}
+                            className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-emerald-300 bg-white text-emerald-900 text-right focus:ring-2 focus:ring-emerald-500/30 shadow-2xs"
+                            title={`Edit advance credit deduction for Flat ${reading.flatNumber}`}
+                          />
+                        </div>
+                        {(reading.advancePaid !== undefined && reading.advancePaid > 0) && (
+                          <div className="text-[9px] font-bold text-emerald-800 bg-emerald-100/70 px-1 py-0.5 rounded mt-1 text-center">
+                            Remaining Adv: ₹{reading.advancePaid}
+                          </div>
+                        )}
                       </div>
-                    )}
-
-                    {reading.advancePaid !== undefined && reading.advancePaid > 0 && (
-                      <div className="flex items-center justify-between text-[11px] font-bold py-0.5 text-emerald-800 bg-emerald-100/70 px-1.5 rounded border border-emerald-300">
-                        <span>Remaining Advance (Next Month):</span>
-                        <span className="font-mono font-extrabold text-emerald-900">₹{reading.advancePaid.toLocaleString('en-IN')}</span>
-                      </div>
-                    )}
-
-                    {/* Fallback to previousBalance if pending/advance not explicitly set */}
-                    {reading.pendingAmount === undefined && reading.advanceAmount === undefined && reading.previousBalance !== undefined && reading.previousBalance !== 0 && (
-                      <div className="flex items-center justify-between text-[11px] font-semibold py-0.5">
-                        <span className={reading.previousBalance > 0 ? 'text-rose-600' : 'text-emerald-600'}>
-                          {reading.previousBalance > 0 ? 'Prev Unpaid Dues:' : 'Prev Advance Credit:'}
-                        </span>
-                        <span className={reading.previousBalance > 0 ? 'text-rose-600' : 'text-emerald-600'}>
-                          {reading.previousBalance > 0 ? '+' : '-'}₹{Math.abs(reading.previousBalance).toLocaleString('en-IN')}
-                        </span>
-                      </div>
-                    )}
+                    </div>
 
                     <div className="border-t border-slate-300 pt-1 flex items-center justify-between">
                       <span className="text-[11px] font-bold text-slate-800">Net Payable:</span>
@@ -3865,14 +3966,15 @@ export const AdminDashboard: React.FC = () => {
       {markingFlatId && (() => {
         const targetReading = activeCycle.readings.find((r) => r.flatId === markingFlatId);
         const targetFlat = flats.find((f) => f.id === markingFlatId);
-        const totalDue = (targetReading?.totalBillAmount ?? 0) + (targetReading?.pendingAmount ?? 0);
-        const advanceAmt = targetReading?.advanceAmount ?? 0;
-        const netPayable = targetReading?.netPayableAmount ?? Math.max(0, totalDue - advanceAmt);
+        const modalPending = Math.max(0, Number(paymentPendingInput) || 0);
+        const modalAdvance = Math.max(0, Number(paymentAdvanceInput) || 0);
+        const totalDue = (targetReading?.totalBillAmount ?? 0) + modalPending;
+        const netPayable = Math.max(0, totalDue - modalAdvance);
         const enteredPaidAmount = paymentAmountInput === '' ? 0 : parseFloat(paymentAmountInput) || 0;
         const remaining = netPayable - enteredPaidAmount;
 
-        const isCoveredByAdvance = advanceAmt > 0 && advanceAmt >= totalDue;
-        const surplusAdvance = Math.max(0, advanceAmt - totalDue);
+        const isCoveredByAdvance = modalAdvance > 0 && modalAdvance >= totalDue;
+        const surplusAdvance = Math.max(0, modalAdvance - totalDue);
         const isFullyPaid = (enteredPaidAmount >= netPayable && netPayable > 0) || (netPayable === 0 && isCoveredByAdvance);
         const isPartiallyPaid = enteredPaidAmount > 0 && enteredPaidAmount < netPayable;
         const isAdvancePaid = enteredPaidAmount > netPayable || (isCoveredByAdvance && surplusAdvance > 0);
@@ -3905,42 +4007,59 @@ export const AdminDashboard: React.FC = () => {
                 </button>
               </div>
 
-              {/* Bill Details Summary */}
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1 mb-3">
+              {/* Bill Details Summary with Editable Pending & Advance Balances */}
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2 mb-3">
                 <div className="flex justify-between text-slate-600">
                   <span>Current Month Bill:</span>
                   <span className="font-semibold text-slate-800">
                     ₹{(targetReading?.totalBillAmount ?? 0).toLocaleString('en-IN')}
                   </span>
                 </div>
-                {targetReading?.pendingAmount !== undefined && targetReading.pendingAmount > 0 && (
-                  <div className="flex justify-between font-semibold text-rose-700 bg-rose-50/80 px-2 py-0.5 rounded">
-                    <span>Pending Dues (+ Prev Mo):</span>
-                    <span className="font-mono font-bold">
-                      +₹{targetReading.pendingAmount.toLocaleString('en-IN')}
-                    </span>
+
+                {/* Editable Pending & Advance adjustment inside modal */}
+                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200/80">
+                  <div className="bg-rose-50/70 p-2 rounded-xl border border-rose-200">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] font-bold text-rose-950 uppercase">Prev Dues</span>
+                      <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-rose-200 text-rose-800">+ Add</span>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1 text-xs text-rose-600 font-bold">₹</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={paymentPendingInput === '0' ? '' : paymentPendingInput}
+                        onFocus={(e) => e.target.select()}
+                        placeholder="0"
+                        onChange={(e) => setPaymentPendingInput(e.target.value)}
+                        className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-rose-300 bg-white text-rose-900 text-right focus:ring-2 focus:ring-rose-500/30 shadow-2xs"
+                        title="Pending money from previous month to add into this bill"
+                      />
+                    </div>
                   </div>
-                )}
-                {targetReading?.advanceAmount !== undefined && targetReading.advanceAmount > 0 && (
-                  <div className="flex justify-between font-semibold text-emerald-700 bg-emerald-50/80 px-2 py-0.5 rounded">
-                    <span>Advance Credit (- Deduction):</span>
-                    <span className="font-mono font-bold">
-                      -₹{targetReading.advanceAmount.toLocaleString('en-IN')}
-                    </span>
+
+                  <div className="bg-emerald-50/70 p-2 rounded-xl border border-emerald-200">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] font-bold text-emerald-950 uppercase">Advance Credit</span>
+                      <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-200 text-emerald-800">- Deduct</span>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1 text-xs text-emerald-600 font-bold">₹</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={paymentAdvanceInput === '0' ? '' : paymentAdvanceInput}
+                        onFocus={(e) => e.target.select()}
+                        placeholder="0"
+                        onChange={(e) => setPaymentAdvanceInput(e.target.value)}
+                        className="w-full pl-5 pr-2 py-1 text-xs font-mono font-bold rounded-lg border border-emerald-300 bg-white text-emerald-900 text-right focus:ring-2 focus:ring-emerald-500/30 shadow-2xs"
+                        title="Advance payment credit to deduct from this bill"
+                      />
+                    </div>
                   </div>
-                )}
-                {targetReading?.pendingAmount === undefined && targetReading?.advanceAmount === undefined && targetReading?.previousBalance !== undefined && targetReading.previousBalance !== 0 && (
-                  <div className="flex justify-between font-medium">
-                    <span className={targetReading.previousBalance > 0 ? 'text-rose-700' : 'text-emerald-700'}>
-                      {targetReading.previousBalance > 0 ? 'Previous Unpaid Dues:' : 'Previous Advance Credit:'}
-                    </span>
-                    <span className={`font-mono font-bold ${targetReading.previousBalance > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
-                      {targetReading.previousBalance > 0 ? '+' : '-'}₹
-                      {Math.abs(targetReading.previousBalance).toLocaleString('en-IN')}
-                    </span>
-                  </div>
-                )}
-                <div className="border-t border-slate-200 pt-1 flex justify-between font-extrabold text-sm text-slate-900">
+                </div>
+
+                <div className="border-t border-slate-200 pt-1.5 flex justify-between font-extrabold text-sm text-slate-900">
                   <span>Net Total Payable:</span>
                   <span className="text-emerald-700 text-base font-mono">
                     ₹{netPayable.toLocaleString('en-IN')}
@@ -4004,7 +4123,7 @@ export const AdminDashboard: React.FC = () => {
                         </span>
                       </div>
                       <p className="text-[11px] text-emerald-800">
-                        Monthly bill of ₹{targetReading?.totalBillAmount} was settled from ₹{advanceAmt} advance credit.
+                        Monthly bill of ₹{targetReading?.totalBillAmount} was settled from ₹{modalAdvance} advance credit.
                         {surplusAdvance > 0 && (
                           <span className="block mt-1 font-bold text-emerald-900">
                             👉 ₹{surplusAdvance} remaining advance balance will automatically carry to next month!
@@ -4124,7 +4243,17 @@ export const AdminDashboard: React.FC = () => {
                         method: isCoveredByAdvance && enteredPaidAmount === 0 ? 'Advance Credit' : paymentMethod,
                         upiRef: paymentUtr || undefined,
                         paidAmount: enteredPaidAmount,
+                        pendingAmount: modalPending,
+                        advanceAmount: modalAdvance,
                       });
+                      setDraftReadings((prevMap) => ({
+                        ...prevMap,
+                        [markingFlatId]: {
+                          ...(prevMap[markingFlatId] || { current: targetReading?.currentReading ?? 0, previous: targetReading?.previousReading ?? 0 }),
+                          pendingAmount: modalPending,
+                          advanceAmount: modalAdvance,
+                        },
+                      }));
                       setMarkingFlatId(null);
                       setPaymentUtr('');
                       setPaymentAmountInput('');
